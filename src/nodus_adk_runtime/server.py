@@ -9,6 +9,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
+from .config import settings
+from .api import assistant
+from .middleware.auth import get_current_user, UserContext
+
 logger = structlog.get_logger()
 
 
@@ -20,14 +24,17 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    # CORS middleware
+    # CORS middleware - specific origins for Llibreta and Backoffice
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # TODO: Configure from settings
+        allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Register API routers
+    app.include_router(assistant.router)
 
     @app.get("/health")
     async def health():
@@ -43,7 +50,18 @@ def create_app() -> FastAPI:
             "docs": "/docs",
         }
 
-    logger.info("FastAPI app created")
+    @app.get("/v1/debug/me", response_model=dict)
+    async def debug_me(user_ctx: UserContext = Depends(get_current_user)):
+        """Debug endpoint to validate token and return user context."""
+        return {
+            "sub": user_ctx.sub,
+            "tenant_id": user_ctx.tenant_id,
+            "scopes": user_ctx.scopes,
+            "role_name": user_ctx.role_name,
+            "client_id": user_ctx.client_id,
+        }
+
+    logger.info("FastAPI app created", cors_origins=settings.cors_origins)
     return app
 
 
