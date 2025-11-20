@@ -104,8 +104,9 @@ async def create_session(
         # Run agent
         response_parts = []
         async for event in runner.run_async(
-            session=session,
-            user_content=user_content,
+            user_id=user_ctx.sub,
+            session_id=session.id,
+            new_message=user_content,
         ):
             if hasattr(event, 'content') and event.content:
                 for part in event.content.parts:
@@ -182,8 +183,9 @@ async def add_message(
         # Run agent
         response_parts = []
         async for event in runner.run_async(
-            session=session,
-            user_content=user_content,
+            user_id=user_ctx.sub,
+            session_id=session.id,
+            new_message=user_content,
         ):
             if hasattr(event, 'content') and event.content:
                 for part in event.content.parts:

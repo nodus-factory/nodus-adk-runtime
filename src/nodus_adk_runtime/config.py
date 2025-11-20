@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # Google ADK
     adk_model: str = "gemini-2.0-flash-exp"
     adk_project_id: Optional[str] = None
+    google_api_key: Optional[str] = None  # Google AI Studio API key
 
     # Observability
     log_level: str = "INFO"

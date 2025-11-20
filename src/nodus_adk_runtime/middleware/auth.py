@@ -9,9 +9,10 @@ from fastapi import HTTPException, Security, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from jose import jwt, jwk
+from jose import jwt as jose_jwt, jwk
 from jose.utils import base64url_decode
 from jose.exceptions import JWTError, ExpiredSignatureError, JWTClaimsError
+import jwt as pyjwt  # PyJWT for EdDSA support (better EdDSA handling)
 import httpx
 import structlog
 
@@ -92,7 +93,7 @@ async def validate_token(
         jwks_data = await fetch_jwks()
         
         # Decode token header to get kid
-        unverified_header = jwt.get_unverified_header(token)
+        unverified_header = jose_jwt.get_unverified_header(token)
         kid = unverified_header.get("kid")
         
         if not kid:
@@ -102,16 +103,57 @@ async def validate_token(
             )
         
         # Find matching key in JWKS
-        key = None
-        for jwk_key in jwks_data.get("keys", []):
-            if jwk_key.get("kid") == kid:
-                key = jwk_key
+        jwk_key = None
+        for key in jwks_data.get("keys", []):
+            if key.get("kid") == kid:
+                jwk_key = key
                 break
         
-        if not key:
+        if not jwk_key:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Key not found in JWKS",
+            )
+        
+        # Convert JWK to format expected by python-jose for EdDSA
+        # python-jose doesn't support EdDSA well, so we use cryptography directly
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+            from cryptography.hazmat.primitives import serialization
+            import base64
+            
+            # Extract public key from JWK (EdDSA uses "x" parameter)
+            if jwk_key.get("kty") != "OKP" or jwk_key.get("crv") != "Ed25519":
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Unsupported key type for EdDSA",
+                )
+            
+            # Decode the public key from base64url
+            x = jwk_key.get("x")
+            if not x:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Missing public key data in JWK",
+                )
+            
+            # Decode base64url to bytes
+            public_key_bytes = base64.urlsafe_b64decode(x + '==')  # Add padding
+            
+            # Create Ed25519PublicKey from bytes
+            public_key = Ed25519PublicKey.from_public_bytes(public_key_bytes)
+            
+            # Convert to PEM format for python-jose
+            public_key_pem = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            
+        except Exception as e:
+            logger.error("Failed to construct EdDSA key from JWK", error=str(e), error_type=type(e).__name__)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Failed to process JWK: {str(e)}",
             )
         
         # Verify token
@@ -120,31 +162,33 @@ async def validate_token(
         issuer = "backoffice"
         audience = "backoffice"
         
-        # Decode and verify token
-        # Note: python-jose with cryptography should support EdDSA
-        # Convert JWK to format expected by jose
+        # Decode and verify token using PyJWT (supports EdDSA better than python-jose)
         try:
-            # Use the key directly - jose should handle Ed25519 JWK format
-            payload = jwt.decode(
+            # Use PyJWT with cryptography Ed25519PublicKey directly
+            payload = pyjwt.decode(
                 token,
-                key,
+                public_key,  # Use Ed25519PublicKey directly, PyJWT supports it
                 algorithms=["EdDSA"],
                 issuer=issuer,
                 audience=audience,
-                options={"verify_signature": True},
+                options={"verify_signature": True, "verify_exp": True, "verify_aud": True, "verify_iss": True},
             )
-        except ExpiredSignatureError:
+        except pyjwt.ExpiredSignatureError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token expired",
             )
-        except JWTClaimsError as e:
-            logger.warning("JWT claims error", error=str(e))
+        except pyjwt.InvalidAudienceError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token claims: {str(e)}",
+                detail="Invalid audience",
             )
-        except JWTError as e:
+        except pyjwt.InvalidIssuerError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid issuer",
+            )
+        except pyjwt.InvalidTokenError as e:
             logger.warning("JWT validation error", error=str(e))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
