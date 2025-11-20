@@ -5,7 +5,7 @@ Entry point for the Nodus ADK runtime server.
 Initializes FastAPI app, configures routes, and starts the ADK server.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
