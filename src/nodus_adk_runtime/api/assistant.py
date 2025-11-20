@@ -335,7 +335,8 @@ async def add_message(
         )
         
     except Exception as e:
-        logger.error("Failed to add message", error=str(e), session_id=session_id)
+        import traceback
+        logger.error("Failed to add message", error=str(e), session_id=session_id, traceback=traceback.format_exc())
         # Fallback to stub response
         return SessionResponse(
             session_id=session_id,
