@@ -217,7 +217,7 @@ class QueryKnowledgeBaseTool(BaseTool):
             all_results.sort(key=lambda x: x["score"], reverse=True)
             
             # 🔥 FIX: Apply minimum score threshold to filter irrelevant results
-            MIN_SCORE_THRESHOLD = 0.65  # Adjust based on testing
+            MIN_SCORE_THRESHOLD = 0.50  # Lowered from 0.65 - was filtering valid results
             filtered_results = [r for r in all_results if r["score"] >= MIN_SCORE_THRESHOLD]
             top_results = filtered_results[:limit]
             
