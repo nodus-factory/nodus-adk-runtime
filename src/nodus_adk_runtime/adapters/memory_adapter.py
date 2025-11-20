@@ -28,6 +28,7 @@ class MemoryAdapter:
         database_url: str,
         qdrant_url: str,
         qdrant_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
     ):
         """
         Initialize memory adapter.
@@ -36,11 +37,13 @@ class MemoryAdapter:
             database_url: PostgreSQL connection URL
             qdrant_url: URL of the Qdrant service
             qdrant_api_key: API key for Qdrant authentication
+            openai_api_key: Optional OpenAI API key for embeddings
         """
         self.database_url = database_url
         self.qdrant_memory = QdrantMemoryService(
             qdrant_url=qdrant_url,
             qdrant_api_key=qdrant_api_key,
+            openai_api_key=openai_api_key,
         )
         self._db_pool: Optional[asyncpg.Pool] = None
 
@@ -132,7 +135,7 @@ class MemoryAdapter:
         ]
 
     async def search(
-        self, app_name: str, user_id: str, query: str, limit: int = 10
+        self, app_name: str, user_id: str, query: str, tenant_id: Optional[str] = None, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """
         Search user memory using RAG (Qdrant).
@@ -141,16 +144,18 @@ class MemoryAdapter:
             app_name: Application name
             user_id: User identifier
             query: Search query
+            tenant_id: Optional tenant identifier for multi-tenancy
             limit: Maximum number of results
 
         Returns:
             List of memory items
         """
-        logger.info("Searching memory", user_id=user_id, query=query)
+        logger.info("Searching memory", user_id=user_id, tenant_id=tenant_id, query=query)
         result = await self.qdrant_memory.search_memory(
             app_name=app_name,
             user_id=user_id,
             query=query,
+            tenant_id=tenant_id,
         )
         
         # Convert MemoryEntry to dict

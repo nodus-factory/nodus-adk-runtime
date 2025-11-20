@@ -91,10 +91,11 @@ async def create_session(
             memory_service=memory_service,
         )
         
-        # Create session
+        # Create session with tenant_id in state for multi-tenancy
         session = await runner.session_service.create_session(
             app_name="personal_assistant",
             user_id=user_ctx.sub,
+            state={'tenant_id': user_ctx.tenant_id or 'default'},
         )
         
         # Add user message
@@ -211,6 +212,7 @@ async def add_message(
         session = await runner.session_service.create_session(
             app_name="personal_assistant",
             user_id=user_ctx.sub,
+            state={'tenant_id': user_ctx.tenant_id or 'default'},
         )
         
         # Add user message
