@@ -118,6 +118,11 @@ async def create_session(
         )
         
         # 🔥 FIX: Try to get existing session first, create only if it doesn't exist
+        logger.info("Session lookup", 
+                   requested_session_id=session_id, 
+                   conversation_id=conversation_id,
+                   user_id=user_ctx.sub)
+        
         try:
             session = await runner.session_service.get_session(
                 app_name="personal_assistant",
@@ -125,18 +130,28 @@ async def create_session(
                 session_id=session_id,
             )
             if session:
-                logger.info("Reusing existing session", session_id=session_id, user_id=user_ctx.sub)
+                logger.info("✅ Reusing existing session", 
+                           requested_session_id=session_id,
+                           actual_session_id=session.id,
+                           user_id=user_ctx.sub)
             else:
                 raise ValueError("Session not found")
-        except Exception:
+        except Exception as e:
             # Session doesn't exist, create it
-            logger.info("Creating new session", session_id=session_id, user_id=user_ctx.sub)
+            logger.info("Creating new session", 
+                       requested_session_id=session_id, 
+                       user_id=user_ctx.sub,
+                       error=str(e))
             session = await runner.session_service.create_session(
                 app_name="personal_assistant",
                 user_id=user_ctx.sub,
                 session_id=session_id,
                 state={'tenant_id': user_ctx.tenant_id or 'default'},
             )
+            logger.info("Session created", 
+                       requested_session_id=session_id,
+                       actual_session_id=session.id,
+                       match=session.id == session_id)
         
         # Add user message
         user_content = types.Content(
@@ -256,13 +271,40 @@ async def add_message(
             memory_service=memory_service,
         )
         
-        # 🔥 FIX: Direct message - always create new session for this endpoint
-        # (For streaming endpoint, may want to reuse sessions in the future)
-        session = await runner.session_service.create_session(
-            app_name="personal_assistant",
-            user_id=user_ctx.sub,
-            state={'tenant_id': user_ctx.tenant_id or 'default'},
-        )
+        # 🔥 FIX: Get or create session using the session_id from path
+        logger.info("Session lookup (add_message)", 
+                   session_id=session_id,
+                   user_id=user_ctx.sub)
+        
+        try:
+            session = await runner.session_service.get_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session_id,
+            )
+            if session:
+                logger.info("✅ Reusing existing session (add_message)", 
+                           session_id=session_id,
+                           actual_session_id=session.id,
+                           user_id=user_ctx.sub)
+            else:
+                raise ValueError("Session not found")
+        except Exception as e:
+            # Session doesn't exist, create it with the provided session_id
+            logger.info("Creating new session (add_message)", 
+                       session_id=session_id,
+                       user_id=user_ctx.sub,
+                       error=str(e))
+            session = await runner.session_service.create_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session_id,  # ← CRITICAL: Pass the session_id!
+                state={'tenant_id': user_ctx.tenant_id or 'default'},
+            )
+            logger.info("Session created (add_message)", 
+                       session_id=session_id,
+                       actual_session_id=session.id,
+                       match=session.id == session_id)
         
         # Add user message
         user_content = types.Content(
