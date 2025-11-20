@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Database
-    database_url: str = "postgresql://nodus:nodus@postgres:5432/nodus"
+    database_url: str = "postgresql://nodus:nodus_dev_password@postgres:5432/nodus"
 
     # Redis
     redis_url: str = "redis://redis:6379/0"
@@ -41,11 +41,16 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # CORS
-    cors_origins: list[str] = ["http://localhost:5002", "http://localhost:5001"]
+    cors_origins: str = "http://localhost:5002,http://localhost:5001"
 
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parse CORS origins from comma-separated string."""
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 settings = Settings()
