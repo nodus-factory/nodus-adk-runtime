@@ -10,6 +10,8 @@ import structlog
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 import httpx
+import openai
+import os
 
 if TYPE_CHECKING:
     from google.adk.sessions.session import Session
@@ -29,8 +31,9 @@ class QdrantMemoryService:
         self,
         qdrant_url: str,
         qdrant_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
         collection_name: str = "adk_memory",
-        vector_size: int = 1536,  # OpenAI ada-002 dimension
+        vector_size: int = 1536,  # OpenAI text-embedding-3-small dimension
     ):
         """
         Initialize Qdrant memory service.
@@ -38,6 +41,7 @@ class QdrantMemoryService:
         Args:
             qdrant_url: URL of the Qdrant service
             qdrant_api_key: Optional API key for Qdrant
+            openai_api_key: Optional OpenAI API key for embeddings
             collection_name: Name of the Qdrant collection
             vector_size: Dimension of embedding vectors
         """
@@ -45,6 +49,16 @@ class QdrantMemoryService:
         self.qdrant_api_key = qdrant_api_key
         self.collection_name = collection_name
         self.vector_size = vector_size
+        
+        # Configure OpenAI client
+        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        if self.openai_api_key:
+            openai.api_key = self.openai_api_key
+            self.use_real_embeddings = True
+            logger.info("OpenAI embeddings enabled for memory service")
+        else:
+            self.use_real_embeddings = False
+            logger.warning("No OpenAI API key found, using placeholder embeddings")
         
         # Initialize Qdrant client
         self.client = QdrantClient(
@@ -78,17 +92,27 @@ class QdrantMemoryService:
 
     async def _get_embedding(self, text: str) -> list[float]:
         """
-        Get embedding for text.
-        
-        For now, uses a simple placeholder. In production, use OpenAI or similar.
+        Get embedding for text using OpenAI API.
+        Falls back to placeholder if OpenAI is not available.
         """
-        # TODO: Implement actual embedding generation
-        # For now, return a placeholder vector
-        # In production, use OpenAI embeddings API or similar
+        if self.use_real_embeddings and self.openai_api_key:
+            try:
+                # Use OpenAI embeddings API
+                response = openai.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=text,
+                )
+                embedding = response.data[0].embedding
+                logger.debug("Generated OpenAI embedding", text_length=len(text))
+                return embedding
+            except Exception as e:
+                logger.error("Failed to generate OpenAI embedding, falling back to placeholder", error=str(e))
+                # Fall through to placeholder
+        
+        # Placeholder embeddings (fallback)
         import hashlib
         import struct
         
-        # Generate deterministic placeholder vector based on text hash
         hash_obj = hashlib.sha256(text.encode())
         hash_bytes = hash_obj.digest()
         

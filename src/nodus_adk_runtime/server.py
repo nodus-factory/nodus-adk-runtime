@@ -34,11 +34,11 @@ def create_app() -> FastAPI:
     )
 
     # Register API routers
-        app.include_router(assistant.router)
-        
-        # HITL router
-        from .api import hitl
-        app.include_router(hitl.router)
+    app.include_router(assistant.router)
+    
+    # HITL router
+    from .api import hitl
+    app.include_router(hitl.router)
 
     @app.get("/health")
     async def health():

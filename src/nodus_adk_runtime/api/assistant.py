@@ -37,6 +37,7 @@ def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     memory_service = QdrantMemoryService(
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
+        openai_api_key=settings.openai_api_key,
     )
     
     # Build root agent
