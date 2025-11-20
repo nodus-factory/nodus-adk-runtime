@@ -20,16 +20,17 @@ router = APIRouter(prefix="/v1/assistant", tags=["assistant"])
 
 def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     """
-    Build Root Agent instance and memory service for a user.
+    Build Root Agent instance and memory service for a user with tenant-aware knowledge base access.
     
     Args:
-        user_ctx: User context
+        user_ctx: User context with tenant_id and user_id
         
     Returns:
         Tuple of (agent, memory_service)
     """
     from nodus_adk_runtime.adapters.mcp_adapter import MCPAdapter
     from nodus_adk_runtime.adapters.qdrant_memory_service import QdrantMemoryService
+    from nodus_adk_runtime.tools.query_knowledge_tool import QueryKnowledgeBaseTool
     from nodus_adk_agents.root_agent import build_root_agent
     
     # Initialize adapters
@@ -40,6 +41,15 @@ def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
         openai_api_key=settings.openai_api_key,
     )
     
+    # Create knowledge base tool with proper tenant/user isolation
+    knowledge_tool = QueryKnowledgeBaseTool(
+        qdrant_url=settings.qdrant_url,
+        qdrant_api_key=settings.qdrant_api_key,
+        openai_api_key=settings.openai_api_key,
+        tenant_id=user_ctx.tenant_id or "default",
+        user_id=user_ctx.sub,
+    )
+    
     # Build root agent
     agent = build_root_agent(
         mcp_adapter=mcp_adapter,
@@ -48,6 +58,7 @@ def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
         config={
             "model": settings.adk_model,
         },
+        knowledge_tool=knowledge_tool,  # Pass the tenant-aware knowledge tool
     )
     
     return agent, memory_service
