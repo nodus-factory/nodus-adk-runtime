@@ -173,10 +173,11 @@ class QueryKnowledgeBaseTool(BaseTool):
                         "scope": "private",
                         "metadata": result.payload,
                     })
-                logger.debug(
+                logger.info(
                     "User collection searched",
                     collection=user_collection,
                     results=len(user_search_response.points),
+                    top_scores=[p.score for p in user_search_response.points[:3]],
                 )
             except Exception as e:
                 logger.warning(
@@ -201,10 +202,11 @@ class QueryKnowledgeBaseTool(BaseTool):
                         "scope": "general",
                         "metadata": result.payload,
                     })
-                logger.debug(
+                logger.info(
                     "Tenant collection searched",
                     collection=tenant_collection,
                     results=len(tenant_search_response.points),
+                    top_scores=[p.score for p in tenant_search_response.points[:3]],
                 )
             except Exception as e:
                 logger.warning(
@@ -217,7 +219,18 @@ class QueryKnowledgeBaseTool(BaseTool):
             all_results.sort(key=lambda x: x["score"], reverse=True)
             
             # 🔥 FIX: Apply minimum score threshold to filter irrelevant results
-            MIN_SCORE_THRESHOLD = 0.50  # Lowered from 0.65 - was filtering valid results
+            MIN_SCORE_THRESHOLD = 0.40  # Lowered from 0.50 - short queries like "Coytesa" need lower threshold
+            
+            # Log top results for debugging
+            logger.info(
+                "Raw search results before filtering",
+                query=query,
+                total_results=len(all_results),
+                top_3_scores=[r["score"] for r in all_results[:3]] if all_results else [],
+                user_collection=user_collection,
+                tenant_collection=tenant_collection,
+            )
+            
             filtered_results = [r for r in all_results if r["score"] >= MIN_SCORE_THRESHOLD]
             top_results = filtered_results[:limit]
             
@@ -228,6 +241,7 @@ class QueryKnowledgeBaseTool(BaseTool):
                 filtered_results=len(filtered_results),
                 returned_results=len(top_results),
                 min_score=top_results[0]["score"] if top_results else 0,
+                threshold=MIN_SCORE_THRESHOLD,
             )
             
             if not top_results:
