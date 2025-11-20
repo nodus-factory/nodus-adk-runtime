@@ -18,15 +18,15 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/v1/assistant", tags=["assistant"])
 
 
-def _build_agent_for_user(user_ctx: UserContext) -> Any:
+def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     """
-    Build Root Agent instance for a user.
+    Build Root Agent instance and memory service for a user.
     
     Args:
         user_ctx: User context
         
     Returns:
-        Configured Root Agent instance
+        Tuple of (agent, memory_service)
     """
     from nodus_adk_runtime.adapters.mcp_adapter import MCPAdapter
     from nodus_adk_runtime.adapters.qdrant_memory_service import QdrantMemoryService
@@ -49,7 +49,7 @@ def _build_agent_for_user(user_ctx: UserContext) -> Any:
         },
     )
     
-    return agent
+    return agent, memory_service
 
 
 @router.post("/sessions", response_model=SessionResponse)
@@ -72,7 +72,7 @@ async def create_session(
     
     try:
         # Build agent for user
-        agent = _build_agent_for_user(user_ctx)
+        agent, memory_service = _build_agent_for_user(user_ctx)
         
         # Create session ID
         session_id = request.conversation_id or f"session_{user_ctx.sub}_{uuid.uuid4().hex[:8]}"
@@ -87,6 +87,7 @@ async def create_session(
             app_name="personal_assistant",
             agent=agent,
             session_service=InMemorySessionService(),
+            memory_service=memory_service,
         )
         
         # Create session
@@ -101,17 +102,48 @@ async def create_session(
             parts=[types.Part.from_text(text=request.message)],
         )
         
-        # Run agent
+        # Run agent and collect response data
         response_parts = []
+        citations = []
+        tool_calls = []
+        memories = []
+        intent = None
+        structured_data = []
+        
         async for event in runner.run_async(
             user_id=user_ctx.sub,
             session_id=session.id,
             new_message=user_content,
         ):
+            # Extract text content
             if hasattr(event, 'content') and event.content:
                 for part in event.content.parts:
                     if hasattr(part, 'text') and part.text:
                         response_parts.append(part.text)
+            
+            # Extract tool calls and citations from custom_metadata
+            if hasattr(event, 'custom_metadata') and event.custom_metadata:
+                metadata = event.custom_metadata
+                
+                # Tool calls
+                if 'tool_calls' in metadata:
+                    tool_calls.extend(metadata['tool_calls'])
+                
+                # Citations/sources
+                if 'citations' in metadata:
+                    citations.extend(metadata['citations'])
+                
+                # Memories
+                if 'memories' in metadata:
+                    memories.extend(metadata['memories'])
+                
+                # Intent
+                if 'intent' in metadata:
+                    intent = metadata['intent']
+                
+                # Structured data from tools
+                if 'structured_data' in metadata:
+                    structured_data.extend(metadata['structured_data'])
         
         reply = " ".join(response_parts) if response_parts else "I received your message."
         
@@ -120,6 +152,11 @@ async def create_session(
             conversation_id=conversation_id,
             reply=reply,
             metadata=request.metadata,
+            memories=memories,
+            citations=citations,
+            structured_data=structured_data,
+            intent=intent,
+            tool_calls=tool_calls,
         )
         
     except Exception as e:
@@ -154,7 +191,7 @@ async def add_message(
     
     try:
         # Build agent for user
-        agent = _build_agent_for_user(user_ctx)
+        agent, memory_service = _build_agent_for_user(user_ctx)
         
         # Run agent with user message
         from google.adk.runners import Runner
@@ -165,6 +202,7 @@ async def add_message(
             app_name="personal_assistant",
             agent=agent,
             session_service=InMemorySessionService(),
+            memory_service=memory_service,
         )
         
         # Get or create session
@@ -180,17 +218,48 @@ async def add_message(
             parts=[types.Part.from_text(text=request.message)],
         )
         
-        # Run agent
+        # Run agent and collect response data
         response_parts = []
+        citations = []
+        tool_calls = []
+        memories = []
+        intent = None
+        structured_data = []
+        
         async for event in runner.run_async(
             user_id=user_ctx.sub,
             session_id=session.id,
             new_message=user_content,
         ):
+            # Extract text content
             if hasattr(event, 'content') and event.content:
                 for part in event.content.parts:
                     if hasattr(part, 'text') and part.text:
                         response_parts.append(part.text)
+            
+            # Extract tool calls and citations from custom_metadata
+            if hasattr(event, 'custom_metadata') and event.custom_metadata:
+                metadata = event.custom_metadata
+                
+                # Tool calls
+                if 'tool_calls' in metadata:
+                    tool_calls.extend(metadata['tool_calls'])
+                
+                # Citations/sources
+                if 'citations' in metadata:
+                    citations.extend(metadata['citations'])
+                
+                # Memories
+                if 'memories' in metadata:
+                    memories.extend(metadata['memories'])
+                
+                # Intent
+                if 'intent' in metadata:
+                    intent = metadata['intent']
+                
+                # Structured data from tools
+                if 'structured_data' in metadata:
+                    structured_data.extend(metadata['structured_data'])
         
         reply = " ".join(response_parts) if response_parts else "I received your message."
         
@@ -199,6 +268,11 @@ async def add_message(
             conversation_id=session_id,
             reply=reply,
             metadata=request.metadata,
+            memories=memories,
+            citations=citations,
+            structured_data=structured_data,
+            intent=intent,
+            tool_calls=tool_calls,
         )
         
     except Exception as e:
