@@ -17,6 +17,19 @@ logger = structlog.get_logger()
 
 router = APIRouter(prefix="/v1/assistant", tags=["assistant"])
 
+# 🔥 CRITICAL FIX: Use shared persistent session service instead of InMemorySessionService
+# This ensures conversation context is maintained across messages
+_session_service: Optional[Any] = None
+
+def get_session_service():
+    """Get or create the shared persistent session service."""
+    global _session_service
+    if _session_service is None:
+        from google.adk.sessions.database_session_service import DatabaseSessionService
+        logger.info("Initializing DatabaseSessionService", database_url=settings.database_url)
+        _session_service = DatabaseSessionService(db_url=settings.database_url)
+    return _session_service
+
 
 def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     """
@@ -92,22 +105,38 @@ async def create_session(
         
         # Run agent with user message
         from google.adk.runners import Runner
-        from google.adk.sessions.in_memory_session_service import InMemorySessionService
         from google.genai import types
+        
+        # 🔥 FIX: Use shared persistent session service to maintain conversation context
+        session_service = get_session_service()
         
         runner = Runner(
             app_name="personal_assistant",
             agent=agent,
-            session_service=InMemorySessionService(),
+            session_service=session_service,
             memory_service=memory_service,
         )
         
-        # Create session with tenant_id in state for multi-tenancy
-        session = await runner.session_service.create_session(
-            app_name="personal_assistant",
-            user_id=user_ctx.sub,
-            state={'tenant_id': user_ctx.tenant_id or 'default'},
-        )
+        # 🔥 FIX: Try to get existing session first, create only if it doesn't exist
+        try:
+            session = await runner.session_service.get_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session_id,
+            )
+            if session:
+                logger.info("Reusing existing session", session_id=session_id, user_id=user_ctx.sub)
+            else:
+                raise ValueError("Session not found")
+        except Exception:
+            # Session doesn't exist, create it
+            logger.info("Creating new session", session_id=session_id, user_id=user_ctx.sub)
+            session = await runner.session_service.create_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session_id,
+                state={'tenant_id': user_ctx.tenant_id or 'default'},
+            )
         
         # Add user message
         user_content = types.Content(
@@ -215,18 +244,20 @@ async def add_message(
         
         # Run agent with user message
         from google.adk.runners import Runner
-        from google.adk.sessions.in_memory_session_service import InMemorySessionService
         from google.genai import types
+        
+        # 🔥 FIX: Use shared persistent session service
+        session_service = get_session_service()
         
         runner = Runner(
             app_name="personal_assistant",
             agent=agent,
-            session_service=InMemorySessionService(),
+            session_service=session_service,
             memory_service=memory_service,
         )
         
-        # Get or create session
-        # TODO: Use persistent session service instead of InMemory
+        # 🔥 FIX: Direct message - always create new session for this endpoint
+        # (For streaming endpoint, may want to reuse sessions in the future)
         session = await runner.session_service.create_session(
             app_name="personal_assistant",
             user_id=user_ctx.sub,
