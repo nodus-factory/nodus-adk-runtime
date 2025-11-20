@@ -18,15 +18,15 @@ import httpx
 import openai
 import os
 import hashlib
-
-if TYPE_CHECKING:
-    from google.adk.sessions.session import Session
-    from google.adk.memory.base_memory_service import SearchMemoryResponse, MemoryEntry
+from google.adk.memory.base_memory_service import BaseMemoryService, SearchMemoryResponse, MemoryEntry
+from google.adk.sessions.session import Session
+from google.genai import types
+from typing_extensions import override
 
 logger = structlog.get_logger()
 
 
-class QdrantMemoryService:
+class QdrantMemoryService(BaseMemoryService):
     """
     Qdrant-based memory service with multi-tenancy support.
     
@@ -147,16 +147,17 @@ class QdrantMemoryService:
             vector.append(0.0)
         return vector[:self.vector_size]
 
+    @override
     async def add_session_to_memory(
         self, 
-        session: "Session",
+        session: Session,
         is_general: bool = False
     ):
         """
         Add a session to memory (private user collection or general tenant collection).
 
         Args:
-            session: ADK Session object (must have tenant_id in custom_metadata)
+            session: ADK Session object (must have tenant_id in state)
             is_general: If True, stores in tenant general collection; otherwise in user private collection
         """
         # Extract tenant_id from session state
@@ -241,6 +242,7 @@ class QdrantMemoryService:
             logger.error("Failed to add session to memory", error=str(e), session_id=session.id, tenant_id=tenant_id)
             raise
 
+    @override
     async def search_memory(
         self,
         *,
@@ -249,7 +251,7 @@ class QdrantMemoryService:
         query: str,
         tenant_id: Optional[str] = None,
         limit: int = 5,
-    ) -> "SearchMemoryResponse":
+    ) -> SearchMemoryResponse:
         """
         Search memory for relevant content in both tenant general and user private collections.
 
@@ -331,10 +333,6 @@ class QdrantMemoryService:
             top_results = all_results[:limit * 2]  # Allow up to 2x limit for combined results
             
             # Convert to MemoryEntry format
-            from google.adk.memory.memory_entry import MemoryEntry
-            from google.adk.memory.base_memory_service import SearchMemoryResponse
-            from google.genai import types
-            
             memories = []
             for item in top_results:
                 result = item['result']
@@ -369,6 +367,5 @@ class QdrantMemoryService:
             
         except Exception as e:
             logger.error("Failed to search memory", error=str(e), tenant_id=tenant_id, user_id=user_id)
-            from google.adk.memory.base_memory_service import SearchMemoryResponse
             return SearchMemoryResponse(memories=[])
 
