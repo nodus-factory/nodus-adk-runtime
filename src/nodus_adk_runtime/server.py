@@ -27,7 +27,7 @@ def create_app() -> FastAPI:
     # CORS middleware - specific origins for Llibreta and Backoffice
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=settings.cors_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
             "client_id": user_ctx.client_id,
         }
 
-    logger.info("FastAPI app created", cors_origins=settings.cors_origins)
+    logger.info("FastAPI app created", cors_origins=settings.cors_origins_list)
     return app
 
 
