@@ -215,18 +215,25 @@ class QueryKnowledgeBaseTool(BaseTool):
             
             # Sort by score and limit
             all_results.sort(key=lambda x: x["score"], reverse=True)
-            top_results = all_results[:limit]
+            
+            # 🔥 FIX: Apply minimum score threshold to filter irrelevant results
+            MIN_SCORE_THRESHOLD = 0.65  # Adjust based on testing
+            filtered_results = [r for r in all_results if r["score"] >= MIN_SCORE_THRESHOLD]
+            top_results = filtered_results[:limit]
             
             logger.info(
                 "Knowledge base search completed",
                 query=query,
-                total_results=len(top_results),
+                total_results=len(all_results),
+                filtered_results=len(filtered_results),
+                returned_results=len(top_results),
+                min_score=top_results[0]["score"] if top_results else 0,
             )
             
             if not top_results:
                 return {
                     "status": "success",
-                    "message": "No relevant documents found",
+                    "message": "No relevant documents found in the knowledge base for this query",
                     "results": [],
                 }
             
