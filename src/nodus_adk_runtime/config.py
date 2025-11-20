@@ -1,0 +1,49 @@
+"""
+Configuration Management
+
+Centralized configuration using pydantic-settings.
+"""
+
+from pydantic_settings import BaseSettings
+from typing import Optional
+
+
+class Settings(BaseSettings):
+    """Application settings."""
+
+    # Server
+    host: str = "0.0.0.0"
+    port: int = 8080
+    debug: bool = False
+
+    # Database
+    database_url: str = "postgresql://nodus:nodus@postgres:5432/nodus"
+
+    # Redis
+    redis_url: str = "redis://redis:6379/0"
+
+    # Backoffice
+    backoffice_url: str = "http://backoffice:5001"
+    backoffice_api_key: Optional[str] = None
+
+    # MCP Gateway
+    mcp_gateway_url: str = "http://mcp-gateway:7443"
+
+    # Memory Layer
+    qdrant_url: str = "http://qdrant:6333"
+    qdrant_api_key: Optional[str] = None
+
+    # Google ADK
+    adk_model: str = "gemini-2.0-flash-exp"
+    adk_project_id: Optional[str] = None
+
+    # Observability
+    log_level: str = "INFO"
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+
+settings = Settings()
+
