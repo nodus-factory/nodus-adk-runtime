@@ -149,6 +149,13 @@ async def create_session(
         
         reply = " ".join(response_parts) if response_parts else "I received your message."
         
+        # Save session to memory after processing
+        try:
+            await memory_service.add_session_to_memory(session)
+            logger.info("Session saved to memory (create)", session_id=session.id, tenant_id=user_ctx.tenant_id)
+        except Exception as e:
+            logger.error("Failed to save session to memory", error=str(e), session_id=session.id)
+        
         return SessionResponse(
             session_id=session_id,
             conversation_id=conversation_id,
@@ -265,6 +272,13 @@ async def add_message(
                     structured_data.extend(metadata['structured_data'])
         
         reply = " ".join(response_parts) if response_parts else "I received your message."
+        
+        # Save session to memory after processing
+        try:
+            await memory_service.add_session_to_memory(session)
+            logger.info("Session saved to memory (add_message)", session_id=session.id, tenant_id=user_ctx.tenant_id)
+        except Exception as e:
+            logger.error("Failed to save session to memory", error=str(e), session_id=session.id)
         
         return SessionResponse(
             session_id=session_id,
