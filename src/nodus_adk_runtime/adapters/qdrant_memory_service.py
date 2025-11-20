@@ -294,11 +294,11 @@ class QdrantMemoryService(BaseMemoryService):
             
             # 1. Search in user private collection
             try:
-                user_results = self.client.search(
+                user_results = self.client.query_points(
                     collection_name=user_collection,
-                    query_vector=query_embedding,
+                    query=query_embedding,
                     limit=limit,
-                )
+                ).points
                 for result in user_results:
                     all_results.append({
                         'result': result,
@@ -311,11 +311,11 @@ class QdrantMemoryService(BaseMemoryService):
             
             # 2. Search in tenant general collection
             try:
-                tenant_results = self.client.search(
+                tenant_results = self.client.query_points(
                     collection_name=tenant_collection,
-                    query_vector=query_embedding,
+                    query=query_embedding,
                     limit=limit,
-                )
+                ).points
                 for result in tenant_results:
                     all_results.append({
                         'result': result,
