@@ -31,7 +31,7 @@ def get_session_service():
     return _session_service
 
 
-def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
+async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     """
     Build Root Agent instance and memory service for a user with tenant-aware knowledge base access.
     
@@ -63,7 +63,22 @@ def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
         user_id=user_ctx.sub,
     )
     
-    # Build root agent
+    # Load A2A tools BEFORE building the agent (to avoid event loop conflicts)
+    a2a_tools = []
+    try:
+        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import get_a2a_tools
+        a2a_tools = await get_a2a_tools()
+        
+        if a2a_tools:
+            logger.info(
+                "A2A tools loaded for agent",
+                count=len(a2a_tools),
+                tools=[t.__name__ for t in a2a_tools],
+            )
+    except Exception as e:
+        logger.warning("Failed to load A2A tools in assistant.py", error=str(e))
+    
+    # Build root agent with pre-loaded A2A tools
     agent = build_root_agent(
         mcp_adapter=mcp_adapter,
         memory_service=memory_service,
@@ -72,6 +87,7 @@ def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
             "model": settings.adk_model,
         },
         knowledge_tool=knowledge_tool,  # Pass the tenant-aware knowledge tool
+        a2a_tools=a2a_tools,  # Pass pre-loaded A2A tools
     )
     
     return agent, memory_service
@@ -97,7 +113,7 @@ async def create_session(
     
     try:
         # Build agent for user
-        agent, memory_service = _build_agent_for_user(user_ctx)
+        agent, memory_service = await _build_agent_for_user(user_ctx)
         
         # Create session ID
         session_id = request.conversation_id or f"session_{user_ctx.sub}_{uuid.uuid4().hex[:8]}"
@@ -255,7 +271,7 @@ async def add_message(
     
     try:
         # Build agent for user
-        agent, memory_service = _build_agent_for_user(user_ctx)
+        agent, memory_service = await _build_agent_for_user(user_ctx)
         
         # Run agent with user message
         from google.adk.runners import Runner

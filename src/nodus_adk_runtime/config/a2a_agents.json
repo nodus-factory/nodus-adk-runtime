@@ -1,0 +1,37 @@
+{
+  "agents": [
+    {
+      "name": "weather_agent",
+      "endpoint": "http://host.docker.internal:8001/a2a",
+      "card_url": "http://host.docker.internal:8001/",
+      "enabled": true,
+      "timeout": 30,
+      "description": "Real-time weather forecasts for Spanish cities",
+      "capabilities": ["get_forecast"]
+    },
+    {
+      "name": "currency_agent",
+      "endpoint": "http://host.docker.internal:8002/a2a",
+      "card_url": "http://host.docker.internal:8002/",
+      "enabled": true,
+      "timeout": 30,
+      "description": "Currency conversion with real-time exchange rates",
+      "capabilities": ["convert", "convert_multiple"]
+    },
+    {
+      "name": "calculator_agent",
+      "endpoint": "http://host.docker.internal:8003/a2a",
+      "card_url": "http://host.docker.internal:8003/",
+      "enabled": true,
+      "timeout": 10,
+      "description": "Mathematical calculations without external APIs",
+      "capabilities": ["calculate", "percentage"]
+    }
+  ],
+  "discovery": {
+    "enabled": true,
+    "refresh_interval_seconds": 300,
+    "retry_on_failure": true
+  }
+}
+
