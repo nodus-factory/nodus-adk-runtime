@@ -168,6 +168,7 @@ class A2ATool(BaseTool):
                     "action_type": result.get("action_type"),
                     "action_description": result.get("action_description"),
                     "action_data": result.get("action_data"),
+                    "metadata": result.get("metadata"),  # Pass agent's metadata (tool, input_type, etc.)
                     "question": result.get("question"),
                     "preview": result.get("preview"),
                     "message_to_user": f"⚠️ Human confirmation required: {result.get('question', 'Confirm this action?')}"

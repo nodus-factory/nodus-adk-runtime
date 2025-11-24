@@ -74,7 +74,9 @@ async def hitl_events_stream(
                         "Sending HITL event via SSE",
                         user_id=user_id,
                         event_type=event.event_type,
-                        event_id=event.event_id
+                        event_id=event.event_id,
+                        metadata=event.metadata,
+                        action_data=event.action_data
                     )
                     
                     # Send event to client
