@@ -8,3 +8,4 @@ from .query_knowledge_tool import QueryKnowledgeBaseTool
 
 __all__ = ["QueryKnowledgeBaseTool"]
 
+

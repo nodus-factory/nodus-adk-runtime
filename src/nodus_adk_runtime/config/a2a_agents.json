@@ -26,6 +26,24 @@
       "timeout": 10,
       "description": "Mathematical calculations without external APIs",
       "capabilities": ["calculate", "percentage"]
+    },
+    {
+      "name": "email_agent",
+      "endpoint": "http://host.docker.internal:8004/a2a",
+      "card_url": "http://host.docker.internal:8004/",
+      "enabled": true,
+      "timeout": 30,
+      "description": "Send emails with HITL confirmation",
+      "capabilities": ["send_email", "check_inbox"]
+    },
+    {
+      "name": "hitl_math_agent",
+      "endpoint": "http://host.docker.internal:8005/a2a",
+      "card_url": "http://host.docker.internal:8005/",
+      "enabled": true,
+      "timeout": 30,
+      "description": "Interactive multiplication with HITL user input",
+      "capabilities": ["multiply_with_confirmation", "execute_multiplication"]
     }
   ],
   "discovery": {

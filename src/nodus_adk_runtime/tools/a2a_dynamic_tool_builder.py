@@ -1,21 +1,24 @@
 """
 Dynamic A2A Tool Builder
 Generates ADK tools from A2A agent configuration without code changes
+
+Follows the official ADK pattern from McpTool for dynamic tool creation.
 """
 
 import json
+import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 import structlog
 
 from nodus_adk_runtime.config import settings
+from nodus_adk_runtime.tools.a2a_tool import A2ATool
 
 logger = structlog.get_logger()
 
-# Import A2AClient from nodus-adk-agents
-import sys
+# Import A2AClient from nodus-adk-agents (needed for discover_capabilities)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "nodus-adk-agents" / "src"))
 
 try:
@@ -86,7 +89,7 @@ class A2AToolBuilder:
         
         self.config_path = Path(config_path)
         self.agents: Dict[str, A2AAgentConfig] = {}
-        self.tools: List[Callable] = []
+        self.tools: List[A2ATool] = []
         
         if A2AClient is None:
             logger.error("A2AClient not available, cannot build A2A tools")
@@ -166,91 +169,19 @@ class A2AToolBuilder:
             )
             return {}
     
-    def _create_tool_function(
-        self,
-        agent_name: str,
-        endpoint: str,
-        method: str,
-        method_info: Dict[str, Any],
-        timeout: float,
-    ) -> Callable:
-        """
-        Create a Python function that calls an A2A agent method
-        
-        This function will be used as an ADK tool
-        """
-        if A2AClient is None:
-            async def dummy_tool(**kwargs):
-                return {"error": "A2AClient not available"}
-            return dummy_tool
-        
-        # Generate function dynamically
-        async def a2a_tool(**kwargs):
-            """
-            Auto-generated A2A tool
-            
-            This tool calls a remote A2A agent via HTTP
-            """
-            try:
-                client = A2AClient(endpoint, timeout=timeout)
-                result = await client.call(method, kwargs)
-                
-                logger.info(
-                    "A2A tool call successful",
-                    agent=agent_name,
-                    method=method,
-                )
-                
-                return result
-            
-            except Exception as e:
-                logger.error(
-                    "A2A tool call failed",
-                    agent=agent_name,
-                    method=method,
-                    error=str(e),
-                )
-                return {"error": f"A2A call failed: {str(e)}"}
-        
-        # Set function metadata for ADK
-        a2a_tool.__name__ = f"{agent_name}_{method}"
-        a2a_tool.__doc__ = method_info.get("description", f"Call {method} on {agent_name}")
-        
-        # Add parameter info as function attributes (ADK can read these)
-        a2a_tool.__annotations__ = {}
-        
-        # Handle parameters (can be either direct dict or JSON Schema format)
-        parameters = method_info.get("parameters", {})
-        if isinstance(parameters, dict):
-            # Check if it's JSON Schema format (has "properties")
-            if "properties" in parameters:
-                param_properties = parameters.get("properties", {})
-            else:
-                # Direct format (old style)
-                param_properties = parameters
-            
-            for param_name, param_info in param_properties.items():
-                # Map JSON Schema types to Python types
-                param_type = param_info.get("type", "string")
-                python_type = {
-                    "string": str,
-                    "integer": int,
-                    "number": float,
-                    "boolean": bool,
-                    "array": list,
-                    "object": dict,
-                }.get(param_type, Any)
-                
-                a2a_tool.__annotations__[param_name] = python_type
-        
-        return a2a_tool
+    # _create_tool_function method removed
+    # Now using A2ATool(BaseTool) directly following McpTool pattern
     
-    async def build_tools(self) -> List[Callable]:
+    async def build_tools(self) -> List[A2ATool]:
         """
         Build all ADK tools from configured A2A agents
         
+        Follows the official ADK pattern from McpTool:
+        - Creates BaseTool subclass instances (A2ATool)
+        - Uses parameters_json_schema for dynamic parameters
+        
         Returns:
-            List of tool functions ready for ADK Agent
+            List of A2ATool instances ready for ADK Agent
         """
         self.tools = []
         
@@ -265,15 +196,16 @@ class A2AToolBuilder:
                 )
                 continue
             
-            # Create tool for each capability
+            # Create A2ATool for each capability (like McpTool does)
             capabilities = card.get("capabilities", {})
             
             for method, method_info in capabilities.items():
-                tool = self._create_tool_function(
+                # Create A2ATool instance (ADK-compliant BaseTool)
+                tool = A2ATool(
                     agent_name=agent_config.name,
-                    endpoint=agent_config.endpoint,
                     method=method,
                     method_info=method_info,
+                    endpoint=agent_config.endpoint,
                     timeout=agent_config.timeout,
                 )
                 
@@ -281,15 +213,15 @@ class A2AToolBuilder:
                 
                 logger.info(
                     "Created A2A tool",
-                    name=tool.__name__,
+                    name=tool.name,
                     agent=agent_config.name,
                     method=method,
                 )
         
-        logger.info("A2A tools built", count=len(self.tools))
+        logger.info("A2A tools built (ADK-compliant)", count=len(self.tools))
         return self.tools
     
-    async def reload(self) -> List[Callable]:
+    async def reload(self) -> List[A2ATool]:
         """
         Reload configuration and rebuild tools
         
@@ -307,9 +239,11 @@ class A2AToolBuilder:
 _tool_builder: Optional[A2AToolBuilder] = None
 
 
-async def get_a2a_tools(config_path: Optional[str] = None) -> List[Callable]:
+async def get_a2a_tools(config_path: Optional[str] = None) -> List[A2ATool]:
     """
     Get all A2A tools for the ADK agent
+    
+    Follows the official ADK pattern from McpToolset.
     
     Usage:
         a2a_tools = await get_a2a_tools()
@@ -323,7 +257,7 @@ async def get_a2a_tools(config_path: Optional[str] = None) -> List[Callable]:
         config_path: Optional path to config file
         
     Returns:
-        List of tool functions
+        List of A2ATool (BaseTool) instances
     """
     global _tool_builder
     
@@ -334,11 +268,14 @@ async def get_a2a_tools(config_path: Optional[str] = None) -> List[Callable]:
     return await _tool_builder.build_tools()
 
 
-async def reload_a2a_tools() -> List[Callable]:
+async def reload_a2a_tools() -> List[A2ATool]:
     """
     Reload A2A tools from configuration
     
     Useful for hot reload without restarting
+    
+    Returns:
+        List of A2ATool instances
     """
     global _tool_builder
     
