@@ -20,3 +20,4 @@ EXPOSE 8080
 # Install nodus-adk-agents at runtime from mounted volume
 CMD ["sh", "-c", "pip install -q -e /nodus-adk-agents && python -m uvicorn nodus_adk_runtime.server:app --host 0.0.0.0 --port 8080 --reload"]
 
+

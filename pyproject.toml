@@ -23,6 +23,7 @@ dependencies = [
     "openai>=1.0.0",
     "asyncpg>=0.29.0",
     "sqlalchemy[asyncio]>=2.0.0",  # Required for DatabaseSessionService
+    "sse-starlette>=1.8.2",  # Server-Sent Events for HITL real-time notifications
 ]
 
 [project.optional-dependencies]
@@ -55,4 +56,5 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
 
