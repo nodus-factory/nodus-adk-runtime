@@ -193,3 +193,4 @@ class MemoryAdapter:
         if self._db_pool:
             await self._db_pool.close()
 
+

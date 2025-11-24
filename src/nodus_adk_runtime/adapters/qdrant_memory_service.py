@@ -208,6 +208,19 @@ class QdrantMemoryService(BaseMemoryService):
                 embedding = await self._get_embedding(event_data['text'])
                 
                 point_id = f"{session.id}_{idx}"
+                # Handle timestamp: convert to ISO format if it's datetime, or convert float to datetime first
+                timestamp_value = event_data['timestamp']
+                if timestamp_value:
+                    if isinstance(timestamp_value, (int, float)):
+                        from datetime import datetime
+                        timestamp_iso = datetime.fromtimestamp(timestamp_value).isoformat()
+                    elif hasattr(timestamp_value, 'isoformat'):
+                        timestamp_iso = timestamp_value.isoformat()
+                    else:
+                        timestamp_iso = str(timestamp_value)
+                else:
+                    timestamp_iso = None
+                
                 point = PointStruct(
                     id=point_id,
                     vector=embedding,
@@ -218,7 +231,7 @@ class QdrantMemoryService(BaseMemoryService):
                         'tenant_id': tenant_id,
                         'text': event_data['text'],
                         'author': event_data['author'],
-                        'timestamp': event_data['timestamp'].isoformat() if event_data['timestamp'] else None,
+                        'timestamp': timestamp_iso,
                         'scope': scope,
                     },
                 )

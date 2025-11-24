@@ -178,3 +178,4 @@ class MCPAdapter:
         """Close the HTTP client."""
         await self.client.aclose()
 
+
