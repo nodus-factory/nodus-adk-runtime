@@ -285,3 +285,18 @@ async def reload_a2a_tools() -> List[A2ATool]:
     
     return await _tool_builder.reload()
 
+
+def get_agent_config(agent_name: str) -> Optional[A2AAgentConfig]:
+    """
+    Get configuration for a specific A2A agent
+    
+    Args:
+        agent_name: Name of the agent
+        
+    Returns:
+        Agent configuration or None if not found
+    """
+    if _tool_builder is None:
+        return None
+    return _tool_builder.agents.get(agent_name)
+

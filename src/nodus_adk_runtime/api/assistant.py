@@ -317,9 +317,17 @@ async def create_session(
                     action_data = hitl_data.get('action_data', {})
                     
                     # Determine execution method name
-                    execution_method = original_method.replace('_with_confirmation', '')
-                    if execution_method == original_method:
-                        execution_method = f"execute_{original_method}"
+                    # Convention: {action}_with_confirmation → execute_{action}
+                    # Special cases for specific agents
+                    if agent_name == "hitl_math_agent" and original_method == "multiply_with_confirmation":
+                        execution_method = "execute_multiplication"
+                    else:
+                        # Generic fallback: remove _with_confirmation and add execute_ prefix
+                        execution_method = original_method.replace('_with_confirmation', '')
+                        if execution_method == original_method:
+                            execution_method = f"execute_{original_method}"
+                        else:
+                            execution_method = f"execute_{execution_method}"
                     
                     logger.info(
                         "Executing HITL-approved action directly",
@@ -331,18 +339,30 @@ async def create_session(
                     
                     try:
                         # Get agent endpoint from A2A config
-                        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import _a2a_config
-                        agent_config = next((a for a in _a2a_config.get('agents', []) if a['name'] == agent_name), None)
+                        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import get_agent_config
+                        agent_config = get_agent_config(agent_name)
                         
                         if not agent_config:
                             raise ValueError(f"Agent {agent_name} not found in A2A config")
                         
-                        endpoint = agent_config['endpoint']
+                        endpoint = agent_config.endpoint
                         
                         # Call execution method directly via A2A
                         from nodus_adk_agents.a2a_client import A2AClient
                         client = A2AClient(endpoint, timeout=30.0)
-                        execution_result = await client.call(execution_method, action_data)
+                        
+                        # Filter action_data to only include parameters accepted by the execution method
+                        # For hitl_math_agent: only base_number and factor
+                        if agent_name == "hitl_math_agent" and execution_method == "execute_multiplication":
+                            execution_params = {
+                                "base_number": action_data.get("base_number"),
+                                "factor": action_data.get("factor", 2.0)
+                            }
+                        else:
+                            # Generic fallback: pass all action_data
+                            execution_params = action_data
+                        
+                        execution_result = await client.call(execution_method, execution_params)
                         
                         logger.info(
                             "HITL action executed successfully",
@@ -632,9 +652,17 @@ async def add_message(
                     action_data = hitl_data.get('action_data', {})
                     
                     # Determine execution method name
-                    execution_method = original_method.replace('_with_confirmation', '')
-                    if execution_method == original_method:
-                        execution_method = f"execute_{original_method}"
+                    # Convention: {action}_with_confirmation → execute_{action}
+                    # Special cases for specific agents
+                    if agent_name == "hitl_math_agent" and original_method == "multiply_with_confirmation":
+                        execution_method = "execute_multiplication"
+                    else:
+                        # Generic fallback: remove _with_confirmation and add execute_ prefix
+                        execution_method = original_method.replace('_with_confirmation', '')
+                        if execution_method == original_method:
+                            execution_method = f"execute_{original_method}"
+                        else:
+                            execution_method = f"execute_{execution_method}"
                     
                     logger.info(
                         "Executing HITL-approved action directly",
@@ -646,18 +674,30 @@ async def add_message(
                     
                     try:
                         # Get agent endpoint from A2A config
-                        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import _a2a_config
-                        agent_config = next((a for a in _a2a_config.get('agents', []) if a['name'] == agent_name), None)
+                        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import get_agent_config
+                        agent_config = get_agent_config(agent_name)
                         
                         if not agent_config:
                             raise ValueError(f"Agent {agent_name} not found in A2A config")
                         
-                        endpoint = agent_config['endpoint']
+                        endpoint = agent_config.endpoint
                         
                         # Call execution method directly via A2A
                         from nodus_adk_agents.a2a_client import A2AClient
                         client = A2AClient(endpoint, timeout=30.0)
-                        execution_result = await client.call(execution_method, action_data)
+                        
+                        # Filter action_data to only include parameters accepted by the execution method
+                        # For hitl_math_agent: only base_number and factor
+                        if agent_name == "hitl_math_agent" and execution_method == "execute_multiplication":
+                            execution_params = {
+                                "base_number": action_data.get("base_number"),
+                                "factor": action_data.get("factor", 2.0)
+                            }
+                        else:
+                            # Generic fallback: pass all action_data
+                            execution_params = action_data
+                        
+                        execution_result = await client.call(execution_method, execution_params)
                         
                         logger.info(
                             "HITL action executed successfully",
