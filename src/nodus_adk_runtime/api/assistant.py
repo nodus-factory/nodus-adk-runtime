@@ -310,30 +310,90 @@ async def create_session(
                 )
                 
                 if decision.approved:
-                    # User approved! Re-run agent with confirmation
-                    confirmation_message = types.Content(
-                        role="user",
-                        parts=[types.Part.from_text(
-                            text=f"Yes, proceed with the action. (HITL approved: {event_id})"
-                        )],
+                    # HYBRID APPROACH: Execute action directly + feed result to Root Agent
+                    # Step 1: Execute the HITL-approved action directly via A2A
+                    agent_name = hitl_data.get('agent')
+                    original_method = hitl_data.get('method')
+                    action_data = hitl_data.get('action_data', {})
+                    
+                    # Determine execution method name
+                    execution_method = original_method.replace('_with_confirmation', '')
+                    if execution_method == original_method:
+                        execution_method = f"execute_{original_method}"
+                    
+                    logger.info(
+                        "Executing HITL-approved action directly",
+                        agent=agent_name,
+                        original_method=original_method,
+                        execution_method=execution_method,
+                        params=action_data
                     )
                     
-                    # Clear previous response parts
-                    response_parts = []
-                    
-                    # Re-run agent with approval
-                    async for event in runner.run_async(
-                        user_id=user_ctx.sub,
-                        session_id=session.id,
-                        new_message=confirmation_message,
-                    ):
-                        if hasattr(event, 'content') and event.content:
-                            for part in event.content.parts:
-                                if hasattr(part, 'text') and part.text:
-                                    response_parts.append(part.text)
-                    
-                    reply = " ".join(response_parts) if response_parts else "Action completed successfully."
-                    logger.info("HITL approved action executed", event_id=event_id)
+                    try:
+                        # Get agent endpoint from A2A config
+                        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import _a2a_config
+                        agent_config = next((a for a in _a2a_config.get('agents', []) if a['name'] == agent_name), None)
+                        
+                        if not agent_config:
+                            raise ValueError(f"Agent {agent_name} not found in A2A config")
+                        
+                        endpoint = agent_config['endpoint']
+                        
+                        # Call execution method directly via A2A
+                        from nodus_adk_agents.a2a_client import A2AClient
+                        client = A2AClient(endpoint, timeout=30.0)
+                        execution_result = await client.call(execution_method, action_data)
+                        
+                        logger.info(
+                            "HITL action executed successfully",
+                            agent=agent_name,
+                            method=execution_method,
+                            result=execution_result
+                        )
+                        
+                        # Step 2: Feed result back to Root Agent for final response
+                        result_value = execution_result.get('result', execution_result)
+                        result_explanation = execution_result.get('explanation', f"Result: {result_value}")
+                        
+                        continuation_message = types.Content(
+                            role="user",
+                            parts=[types.Part.from_text(
+                                text=(
+                                    f"The action has been completed successfully. "
+                                    f"The result is: {result_explanation}. "
+                                    f"Please provide a final response to the user with this result."
+                                )
+                            )],
+                        )
+                        
+                        # Clear previous response parts
+                        response_parts = []
+                        
+                        # Step 3: Continue Root Agent with the result
+                        logger.info("Continuing Root Agent with execution result", session_id=session.id)
+                        
+                        async for event in runner.run_async(
+                            user_id=user_ctx.sub,
+                            session_id=session.id,
+                            new_message=continuation_message,
+                        ):
+                            if hasattr(event, 'content') and event.content:
+                                for part in event.content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        response_parts.append(part.text)
+                        
+                        # Step 4: Final reply with result
+                        reply = " ".join(response_parts) if response_parts else result_explanation
+                        logger.info("HITL flow completed successfully", event_id=event_id)
+                        
+                    except Exception as exec_error:
+                        logger.error(
+                            "HITL action execution failed",
+                            error=str(exec_error),
+                            agent=agent_name,
+                            method=execution_method
+                        )
+                        reply = f"Action could not be executed: {str(exec_error)}"
                 else:
                     # User rejected
                     reply = f"Action cancelled: {decision.reason or 'User declined the request.'}"
@@ -565,30 +625,90 @@ async def add_message(
                 )
                 
                 if decision.approved:
-                    # User approved! Re-run agent with confirmation
-                    confirmation_message = types.Content(
-                        role="user",
-                        parts=[types.Part.from_text(
-                            text=f"Yes, proceed with the action. (HITL approved: {event_id})"
-                        )],
+                    # HYBRID APPROACH: Execute action directly + feed result to Root Agent
+                    # Step 1: Execute the HITL-approved action directly via A2A
+                    agent_name = hitl_data.get('agent')
+                    original_method = hitl_data.get('method')
+                    action_data = hitl_data.get('action_data', {})
+                    
+                    # Determine execution method name
+                    execution_method = original_method.replace('_with_confirmation', '')
+                    if execution_method == original_method:
+                        execution_method = f"execute_{original_method}"
+                    
+                    logger.info(
+                        "Executing HITL-approved action directly",
+                        agent=agent_name,
+                        original_method=original_method,
+                        execution_method=execution_method,
+                        params=action_data
                     )
                     
-                    # Clear previous response parts
-                    response_parts = []
-                    
-                    # Re-run agent with approval
-                    async for event in runner.run_async(
-                        user_id=user_ctx.sub,
-                        session_id=session.id,
-                        new_message=confirmation_message,
-                    ):
-                        if hasattr(event, 'content') and event.content:
-                            for part in event.content.parts:
-                                if hasattr(part, 'text') and part.text:
-                                    response_parts.append(part.text)
-                    
-                    reply = " ".join(response_parts) if response_parts else "Action completed successfully."
-                    logger.info("HITL approved action executed", event_id=event_id)
+                    try:
+                        # Get agent endpoint from A2A config
+                        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import _a2a_config
+                        agent_config = next((a for a in _a2a_config.get('agents', []) if a['name'] == agent_name), None)
+                        
+                        if not agent_config:
+                            raise ValueError(f"Agent {agent_name} not found in A2A config")
+                        
+                        endpoint = agent_config['endpoint']
+                        
+                        # Call execution method directly via A2A
+                        from nodus_adk_agents.a2a_client import A2AClient
+                        client = A2AClient(endpoint, timeout=30.0)
+                        execution_result = await client.call(execution_method, action_data)
+                        
+                        logger.info(
+                            "HITL action executed successfully",
+                            agent=agent_name,
+                            method=execution_method,
+                            result=execution_result
+                        )
+                        
+                        # Step 2: Feed result back to Root Agent for final response
+                        result_value = execution_result.get('result', execution_result)
+                        result_explanation = execution_result.get('explanation', f"Result: {result_value}")
+                        
+                        continuation_message = types.Content(
+                            role="user",
+                            parts=[types.Part.from_text(
+                                text=(
+                                    f"The action has been completed successfully. "
+                                    f"The result is: {result_explanation}. "
+                                    f"Please provide a final response to the user with this result."
+                                )
+                            )],
+                        )
+                        
+                        # Clear previous response parts
+                        response_parts = []
+                        
+                        # Step 3: Continue Root Agent with the result
+                        logger.info("Continuing Root Agent with execution result", session_id=session.id)
+                        
+                        async for event in runner.run_async(
+                            user_id=user_ctx.sub,
+                            session_id=session.id,
+                            new_message=continuation_message,
+                        ):
+                            if hasattr(event, 'content') and event.content:
+                                for part in event.content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        response_parts.append(part.text)
+                        
+                        # Step 4: Final reply with result
+                        reply = " ".join(response_parts) if response_parts else result_explanation
+                        logger.info("HITL flow completed successfully", event_id=event_id)
+                        
+                    except Exception as exec_error:
+                        logger.error(
+                            "HITL action execution failed",
+                            error=str(exec_error),
+                            agent=agent_name,
+                            method=execution_method
+                        )
+                        reply = f"Action could not be executed: {str(exec_error)}"
                 else:
                     # User rejected
                     reply = f"Action cancelled: {decision.reason or 'User declined the request.'}"
