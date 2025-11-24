@@ -288,17 +288,23 @@ async def create_session(
             
             # Request confirmation (this waits for user decision via SSE)
             try:
+                # Merge original metadata from agent with session metadata
+                merged_metadata = {
+                    'agent': hitl_data.get('agent'),
+                    'method': hitl_data.get('method'),
+                    'session_id': session.id,
+                    'original_message': request.message,
+                }
+                # Add agent's metadata (tool, input_type, etc.)
+                if hitl_data.get('metadata'):
+                    merged_metadata.update(hitl_data.get('metadata'))
+                
                 decision = await hitl_service.request_confirmation(
                     user_id=user_ctx.sub,
                     event_id=event_id,
                     action_description=hitl_data.get('action_description', 'Unknown action'),
                     action_data=hitl_data.get('action_data', {}),
-                    metadata={
-                        'agent': hitl_data.get('agent'),
-                        'method': hitl_data.get('method'),
-                        'session_id': session.id,
-                        'original_message': request.message,
-                    },
+                    metadata=merged_metadata,
                     timeout=300.0  # 5 minutes
                 )
                 
@@ -354,9 +360,26 @@ async def create_session(
                         # Filter action_data to only include parameters accepted by the execution method
                         # For hitl_math_agent: only base_number and factor
                         if agent_name == "hitl_math_agent" and execution_method == "execute_multiplication":
+                            # If user provided input (number via reason), use it as factor
+                            factor = action_data.get("factor", 2.0)
+                            if decision.reason:
+                                try:
+                                    factor = float(decision.reason)
+                                    logger.info(
+                                        "Using user-provided factor from HITL input",
+                                        user_input=decision.reason,
+                                        parsed_factor=factor
+                                    )
+                                except (ValueError, TypeError):
+                                    logger.warning(
+                                        "Failed to parse user input as number, using default",
+                                        user_input=decision.reason,
+                                        default_factor=factor
+                                    )
+                            
                             execution_params = {
                                 "base_number": action_data.get("base_number"),
-                                "factor": action_data.get("factor", 2.0)
+                                "factor": factor
                             }
                         else:
                             # Generic fallback: pass all action_data
@@ -623,17 +646,23 @@ async def add_message(
             
             # Request confirmation (this waits for user decision via SSE)
             try:
+                # Merge original metadata from agent with session metadata
+                merged_metadata = {
+                    'agent': hitl_data.get('agent'),
+                    'method': hitl_data.get('method'),
+                    'session_id': session.id,
+                    'original_message': request.message,
+                }
+                # Add agent's metadata (tool, input_type, etc.)
+                if hitl_data.get('metadata'):
+                    merged_metadata.update(hitl_data.get('metadata'))
+                
                 decision = await hitl_service.request_confirmation(
                     user_id=user_ctx.sub,
                     event_id=event_id,
                     action_description=hitl_data.get('action_description', 'Unknown action'),
                     action_data=hitl_data.get('action_data', {}),
-                    metadata={
-                        'agent': hitl_data.get('agent'),
-                        'method': hitl_data.get('method'),
-                        'session_id': session.id,
-                        'original_message': request.message,
-                    },
+                    metadata=merged_metadata,
                     timeout=300.0  # 5 minutes
                 )
                 
@@ -689,9 +718,26 @@ async def add_message(
                         # Filter action_data to only include parameters accepted by the execution method
                         # For hitl_math_agent: only base_number and factor
                         if agent_name == "hitl_math_agent" and execution_method == "execute_multiplication":
+                            # If user provided input (number via reason), use it as factor
+                            factor = action_data.get("factor", 2.0)
+                            if decision.reason:
+                                try:
+                                    factor = float(decision.reason)
+                                    logger.info(
+                                        "Using user-provided factor from HITL input",
+                                        user_input=decision.reason,
+                                        parsed_factor=factor
+                                    )
+                                except (ValueError, TypeError):
+                                    logger.warning(
+                                        "Failed to parse user input as number, using default",
+                                        user_input=decision.reason,
+                                        default_factor=factor
+                                    )
+                            
                             execution_params = {
                                 "base_number": action_data.get("base_number"),
-                                "factor": action_data.get("factor", 2.0)
+                                "factor": factor
                             }
                         else:
                             # Generic fallback: pass all action_data
