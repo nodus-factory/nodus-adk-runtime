@@ -15,13 +15,14 @@ import structlog
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 import httpx
-import openai
+from openai import OpenAI
 import os
 import hashlib
 from google.adk.memory.base_memory_service import BaseMemoryService, SearchMemoryResponse, MemoryEntry
 from google.adk.sessions.session import Session
 from google.genai import types
 from typing_extensions import override
+from nodus_adk_runtime.config import settings
 
 logger = structlog.get_logger()
 
@@ -58,13 +59,20 @@ class QdrantMemoryService(BaseMemoryService):
         self.vector_size = vector_size
         self.collection_prefix = "adk_memory"
         
-        # Configure OpenAI client
+        # Configure OpenAI client to use LiteLLM proxy for embeddings
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         if self.openai_api_key:
-            openai.api_key = self.openai_api_key
+            self.openai_client = OpenAI(
+                api_key=self.openai_api_key,
+                base_url=settings.litellm_proxy_api_base + "/v1",
+            )
             self.use_real_embeddings = True
-            logger.info("OpenAI embeddings enabled for memory service")
+            logger.info(
+                "OpenAI embeddings enabled via LiteLLM proxy",
+                base_url=settings.litellm_proxy_api_base,
+            )
         else:
+            self.openai_client = None
             self.use_real_embeddings = False
             logger.warning("No OpenAI API key found, using placeholder embeddings")
         
@@ -114,13 +122,13 @@ class QdrantMemoryService(BaseMemoryService):
         """
         if self.use_real_embeddings and self.openai_api_key:
             try:
-                # Use OpenAI embeddings API
-                response = openai.embeddings.create(
+                # Use OpenAI embeddings API via LiteLLM proxy
+                response = self.openai_client.embeddings.create(
                     model="text-embedding-3-small",
                     input=text,
                 )
                 embedding = response.data[0].embedding
-                logger.debug("Generated OpenAI embedding", text_length=len(text))
+                logger.debug("Generated OpenAI embedding via LiteLLM", text_length=len(text))
                 return embedding
             except Exception as e:
                 logger.error("Failed to generate OpenAI embedding, falling back to placeholder", error=str(e))

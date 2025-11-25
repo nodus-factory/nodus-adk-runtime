@@ -13,6 +13,7 @@ from typing_extensions import override
 from qdrant_client import QdrantClient
 from openai import AsyncOpenAI
 import hashlib
+from nodus_adk_runtime.config import settings
 
 logger = structlog.get_logger()
 
@@ -62,9 +63,12 @@ class QueryKnowledgeBaseTool(BaseTool):
         # Initialize Qdrant client
         self.client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
         
-        # Configure OpenAI for embeddings (async client)
+        # Configure OpenAI to use LiteLLM proxy for embeddings
         if openai_api_key:
-            self.openai_client = AsyncOpenAI(api_key=openai_api_key)
+            self.openai_client = AsyncOpenAI(
+                api_key=openai_api_key,
+                base_url=settings.litellm_proxy_api_base + "/v1",
+            )
         else:
             self.openai_client = None
         

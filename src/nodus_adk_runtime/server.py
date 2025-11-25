@@ -12,12 +12,21 @@ import structlog
 from .config import settings
 from .api import assistant
 from .middleware.auth import get_current_user, UserContext
+from .observability import setup_telemetry
 
 logger = structlog.get_logger()
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    # Setup observability BEFORE creating FastAPI app
+    # This ensures all operations are traced from the start
+    telemetry_enabled = setup_telemetry()
+    if telemetry_enabled:
+        logger.info("🔍 OpenTelemetry + Langfuse observability enabled")
+    else:
+        logger.warning("⚠️  Observability not configured - traces will not be collected")
+    
     app = FastAPI(
         title="Nodus ADK Runtime",
         description="ADK-based assistant runtime for Nodus OS",

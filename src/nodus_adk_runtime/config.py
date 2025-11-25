@@ -33,19 +33,41 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: Optional[str] = None
 
-    # Google ADK
-    adk_model: str = "gemini-2.0-flash-exp"
-    adk_project_id: Optional[str] = None
-    google_api_key: Optional[str] = None  # Google AI Studio API key
+    # LiteLLM Proxy (unified AI gateway for ALL models)
+    litellm_proxy_api_base: str = "http://litellm:4000"
+    litellm_proxy_api_key: str = "sk-nodus-master-key"
     
-    # OpenAI (for embeddings)
-    openai_api_key: Optional[str] = None
+    # Model selection (routed through LiteLLM)
+    adk_model: str = "gemini-2.0-flash-exp"
+    
+    # Legacy keys (kept for backwards compatibility, but routed through LiteLLM)
+    adk_project_id: Optional[str] = None
+    google_api_key: Optional[str] = None  # Not used - goes via LiteLLM
+    
+    # OpenAI (for embeddings and ADK via LiteLLM)
+    openai_api_key: str = "sk-nodus-master-key"  # LiteLLM master key
+    openai_api_base: str = "http://litellm:4000/v1"  # Point to LiteLLM
 
-    # Observability
+    # Observability - Langfuse
+    langfuse_enabled: bool = True
+    langfuse_host: str = "http://langfuse:3000"
+    langfuse_public_key: Optional[str] = None
+    langfuse_secret_key: Optional[str] = None
+    
+    # OpenTelemetry Configuration
+    otel_exporter_otlp_endpoint: Optional[str] = None
+    otel_service_name: str = "nodus-adk-runtime"
+    otel_traces_sampler: str = "parentbased_traceidratio"
+    otel_traces_sampler_arg: float = 1.0
+    
+    # ADK Telemetry
+    adk_capture_message_content_in_spans: bool = True
+
+    # Logging
     log_level: str = "INFO"
 
     # CORS
-    cors_origins: str = "http://localhost:5002,http://localhost:5001"
+    cors_origins: str = "http://localhost:5002,http://localhost:5001,http://localhost:3000"
 
     class Config:
         env_file = ".env"
