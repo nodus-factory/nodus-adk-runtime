@@ -13,6 +13,15 @@ COPY pyproject.toml README.md ./
 COPY src/ ./src/
 RUN pip install --no-cache-dir -e ".[dev]"
 
+# Install OpenTelemetry instrumentation packages for observability
+# These are required for tracing with Langfuse
+RUN pip install --no-cache-dir \
+    opentelemetry-api==1.37.0 \
+    opentelemetry-semantic-conventions==0.58b0 \
+    opentelemetry-instrumentation==0.58b0 \
+    opentelemetry-instrumentation-httpx==0.58b0 \
+    opentelemetry-instrumentation-asyncio==0.58b0
+
 # Expose port
 EXPOSE 8080
 
