@@ -8,7 +8,6 @@ with full tracing, metrics, and automatic fallback support.
 from typing import Dict, Any, Optional
 import structlog
 from langfuse import Langfuse
-from langfuse.decorators import observe
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
@@ -38,8 +37,7 @@ class PromptService:
         self.langfuse = Langfuse(
             public_key=langfuse_public_key,
             secret_key=langfuse_secret_key,
-            host=langfuse_host,
-            enabled_metrics=False  # Disable metrics for self-hosted
+            host=langfuse_host
         )
         self.enable_cache = enable_cache
         self._cache: Dict[str, Dict[str, Any]] = {}
@@ -50,7 +48,6 @@ class PromptService:
             cache_enabled=enable_cache
         )
     
-    @observe(name="prompt_service.get_prompt", as_type="span")
     def get_prompt(
         self,
         name: str,
