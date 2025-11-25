@@ -30,6 +30,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
     "opentelemetry-instrumentation-httpx>=0.41b0",
     "opentelemetry-instrumentation-asyncio>=0.41b0",
+    "langfuse>=2.0.0",  # Prompt management
 ]
 
 [project.optional-dependencies]
