@@ -100,6 +100,19 @@ class A2ATool(BaseTool):
         # Extract JSON Schema from method info
         json_schema = self._method_info.get("parameters", {})
         
+        # CRITICAL: Gemini and OpenAI REQUIRE schema to have "type": "object"
+        # Even if there are no parameters, the schema must be a valid JSON Schema
+        if not json_schema or "type" not in json_schema:
+            json_schema = {"type": "object", "properties": {}}
+        elif json_schema.get("type") != "object":
+            # If type is not "object", wrap it properly
+            logger.warning(
+                "A2A tool has non-object schema, wrapping",
+                name=self.name,
+                original_type=json_schema.get("type"),
+            )
+            json_schema = {"type": "object", "properties": {}}
+        
         # Use the modern ADK API: parameters_json_schema
         # This is the same approach used by McpTool
         function_decl = FunctionDeclaration(
@@ -111,7 +124,7 @@ class A2ATool(BaseTool):
         logger.debug(
             "A2ATool declaration created",
             name=self.name,
-            has_parameters=bool(json_schema),
+            has_parameters=bool(json_schema.get("properties")),
         )
         
         return function_decl
