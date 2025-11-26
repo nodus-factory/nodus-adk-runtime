@@ -26,8 +26,11 @@ def get_session_service():
     global _session_service
     if _session_service is None:
         from google.adk.sessions.database_session_service import DatabaseSessionService
-        logger.info("Initializing DatabaseSessionService", database_url=settings.database_url)
-        _session_service = DatabaseSessionService(db_url=settings.database_url)
+        # ADK DatabaseSessionService uses SQLAlchemy async, which requires +asyncpg in the URL
+        # Our database_memory_service uses asyncpg.create_pool() directly, which doesn't accept +asyncpg
+        adk_db_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg://")
+        logger.info("Initializing DatabaseSessionService", database_url=adk_db_url)
+        _session_service = DatabaseSessionService(db_url=adk_db_url)
     return _session_service
 
 

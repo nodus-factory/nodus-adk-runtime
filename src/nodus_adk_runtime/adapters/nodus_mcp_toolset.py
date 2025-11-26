@@ -29,6 +29,7 @@ class NodusMcpTool(BaseTool):
         server: str,
         mcp_adapter: MCPAdapter,
         user_context: UserContext,
+        input_schema: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize MCP tool.
@@ -39,28 +40,40 @@ class NodusMcpTool(BaseTool):
             server: MCP server ID
             mcp_adapter: MCP adapter instance
             user_context: User context for authentication
+            input_schema: Tool input schema from MCP server
         """
         super().__init__(name=name, description=description)
         self.server = server
         self.mcp_adapter = mcp_adapter
         self.user_context = user_context
+        self.input_schema = input_schema or {}
     
     def _get_declaration(self) -> Optional[types.FunctionDeclaration]:
         """Get function declaration for this tool."""
-        # For now, use a generic schema
-        # TODO: Parse actual tool parameters from MCP Gateway
+        # Use the actual input schema from the MCP server
+        # MCP uses JSON Schema format, which is compatible with ADK
+        if self.input_schema:
+            # Convert JSON Schema to ADK Schema
+            try:
+                return types.FunctionDeclaration(
+                    name=self.name,
+                    description=self.description,
+                    parameters_json_schema=self.input_schema,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to convert MCP schema to ADK",
+                    tool=self.name,
+                    error=str(e)
+                )
+        
+        # Fallback to generic schema if conversion fails
         return types.FunctionDeclaration(
             name=self.name,
             description=self.description,
             parameters=types.Schema(
                 type=types.Type.OBJECT,
-                properties={
-                    "args": types.Schema(
-                        type=types.Type.OBJECT,
-                        description="Tool arguments",
-                    ),
-                },
-                required=["args"],
+                properties={},  # Allow any arguments
             ),
         )
     
@@ -74,7 +87,7 @@ class NodusMcpTool(BaseTool):
         Execute the MCP tool.
         
         Args:
-            args: Tool arguments (should contain 'args' key with actual args)
+            args: Tool arguments (direct from ADK, already unwrapped)
             tool_context: Tool execution context
             
         Returns:
@@ -85,16 +98,14 @@ class NodusMcpTool(BaseTool):
             tool=self.name,
             server=self.server,
             user_id=self.user_context.sub,
+            args=args,
         )
         
-        # Extract actual args - ADK may wrap them
-        tool_args = args.get("args", args)
-        
-        # Call MCP adapter
+        # Call MCP adapter with args directly
         result = await self.mcp_adapter.call_tool(
             server=self.server,
             tool=self.name,
-            args=tool_args,
+            args=args,
             context=self.user_context,
         )
         
@@ -123,16 +134,19 @@ class NodusMcpTool(BaseTool):
 
 class NodusMcpToolset(BaseToolset):
     """
-    Toolset that wraps Nodus MCP Gateway tools.
+    Toolset that wraps Nodus MCP Gateway tools for a specific server.
     
     Discovers tools dynamically from the Gateway and creates BaseTool instances.
+    Supports tool filtering to limit exposed tools (following ADK McpToolset pattern).
     """
     
     def __init__(
         self,
         mcp_adapter: MCPAdapter,
         user_context: UserContext,
-        tool_name_prefix: Optional[str] = "mcp_",
+        server_id: Optional[str] = None,
+        tool_filter: Optional[List[str]] = None,
+        tool_name_prefix: Optional[str] = None,
     ):
         """
         Initialize Nodus MCP Toolset.
@@ -140,11 +154,15 @@ class NodusMcpToolset(BaseToolset):
         Args:
             mcp_adapter: MCP adapter instance
             user_context: User context for authentication
-            tool_name_prefix: Prefix for tool names (default: "mcp_")
+            server_id: Specific MCP server ID to limit tools to (e.g., 'b2brouter')
+            tool_filter: List of tool names to include (e.g., ['list_projects', 'create_invoice'])
+            tool_name_prefix: Optional prefix for tool names (default: no prefix)
         """
         super().__init__(tool_name_prefix=tool_name_prefix)
         self.mcp_adapter = mcp_adapter
         self.user_context = user_context
+        self.server_id = server_id
+        self.tool_filter = tool_filter
         self._tools_cache: Optional[List[BaseTool]] = None
     
     async def get_tools(
@@ -154,48 +172,87 @@ class NodusMcpToolset(BaseToolset):
         """
         Get available MCP tools.
         
+        Discovers individual tools from MCP servers and applies tool_filter if specified.
+        
         Args:
             readonly_context: Optional context for filtering
             
         Returns:
-            List of BaseTool instances
+            List of BaseTool instances (individual tools)
         """
-        # For now, return empty list - tools will be discovered dynamically
-        # TODO: Implement dynamic discovery from MCP Gateway
-        # This would require calling mcp_adapter.list_tools() and creating
-        # NodusMcpTool instances for each discovered tool
-        
         if self._tools_cache is None:
-            logger.info("Discovering MCP tools", user_id=self.user_context.sub)
+            logger.info(
+                "Discovering MCP tools",
+                user_id=self.user_context.sub,
+                server_id=self.server_id,
+                tool_filter=self.tool_filter,
+            )
             
             try:
-                # Discover tools from Gateway
-                servers = await self.mcp_adapter.list_tools(self.user_context)
-                
                 tools = []
-                for server_info in servers:
+                
+                # Determine which servers to discover tools from
+                if self.server_id:
+                    # Specific server specified
+                    servers_to_discover = [{"id": self.server_id}]
+                else:
+                    # Discover all available servers
+                    servers_to_discover = await self.mcp_adapter.list_tools(self.user_context)
+                
+                # Discover tools from each server
+                for server_info in servers_to_discover:
                     server_id = server_info.get("server") or server_info.get("id", "unknown")
-                    server_name = server_info.get("name", server_id)
                     
-                    # For now, create a generic tool per server
-                    # In production, we'd need to discover actual tools via tools.list JSON-RPC
-                    tool = NodusMcpTool(
-                        name=f"{server_id}_tool",
-                        description=f"Tool for MCP server: {server_name}",
-                        server=server_id,
-                        mcp_adapter=self.mcp_adapter,
-                        user_context=self.user_context,
+                    # Get individual tools for this server
+                    server_tools = await self.mcp_adapter.list_server_tools(
+                        server_id=server_id,
+                        context=self.user_context
                     )
-                    tools.append(tool)
+                    
+                    for tool_def in server_tools:
+                        tool_name = tool_def.get("name")
+                        if not tool_name:
+                            logger.warning(
+                                "Tool missing name field",
+                                server=server_id,
+                                tool=tool_def
+                            )
+                            continue
+                        
+                        # Apply tool_filter if specified
+                        if self.tool_filter and tool_name not in self.tool_filter:
+                            continue
+                        
+                        # Create NodusMcpTool for each individual tool
+                        tool = NodusMcpTool(
+                            name=tool_name,
+                            description=tool_def.get("description", f"{tool_name} from {server_id}"),
+                            server=server_id,
+                            mcp_adapter=self.mcp_adapter,
+                            user_context=self.user_context,
+                            input_schema=tool_def.get("inputSchema"),
+                        )
+                        tools.append(tool)
+                        
+                        logger.debug(
+                            "Discovered MCP tool",
+                            tool=tool_name,
+                            server=server_id
+                        )
                 
                 self._tools_cache = tools
                 logger.info(
                     "MCP tools discovered",
                     count=len(tools),
-                    servers=[s.get("id") for s in servers],
+                    server_id=self.server_id,
+                    filtered=bool(self.tool_filter),
                 )
             except Exception as e:
-                logger.error("Failed to discover MCP tools", error=str(e))
+                logger.error(
+                    "Failed to discover MCP tools",
+                    error=str(e),
+                    server_id=self.server_id
+                )
                 self._tools_cache = []
         
         return self._tools_cache
