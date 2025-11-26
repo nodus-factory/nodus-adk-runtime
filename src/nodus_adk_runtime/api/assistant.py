@@ -33,7 +33,10 @@ def get_session_service():
 
 async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     """
-    Build Root Agent instance and memory service for a user with tenant-aware knowledge base access.
+    Build Root Agent with tricapa memory architecture:
+    1. ADK Memory (Postgres) - automatic via PreloadMemoryTool
+    2. OpenMemory (MCP) - on-demand episodic/semantic via nodus-memory
+    3. Qdrant (direct) - documents/knowledge base
     
     Args:
         user_ctx: User context with tenant_id and user_id
@@ -42,19 +45,29 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
         Tuple of (agent, memory_service)
     """
     from nodus_adk_runtime.adapters.mcp_adapter import MCPAdapter
-    from nodus_adk_runtime.adapters.qdrant_memory_service import QdrantMemoryService
+    from nodus_adk_runtime.adapters.database_memory_service import DatabaseMemoryService
+    from nodus_adk_runtime.adapters.dual_write_memory_service import DualWriteMemoryService
     from nodus_adk_runtime.tools.query_knowledge_tool import QueryKnowledgeBaseTool
+    from nodus_adk_runtime.prompts.memory_instructions import TRICAPA_MEMORY_INSTRUCTIONS
     from nodus_adk_agents.root_agent import build_root_agent
     
-    # Initialize adapters
+    # Initialize MCP adapter
     mcp_adapter = MCPAdapter(gateway_url=settings.mcp_gateway_url)
-    memory_service = QdrantMemoryService(
-        qdrant_url=settings.qdrant_url,
-        qdrant_api_key=settings.qdrant_api_key,
-        openai_api_key=settings.openai_api_key,
+    
+    # 1. ADK Memory (Postgres - short-term conversation)
+    adk_memory = DatabaseMemoryService(
+        database_url=settings.database_url
     )
     
-    # Create knowledge base tool with proper tenant/user isolation
+    # 2. Wrap with DualWriteMemoryService (writes to OpenMemory too)
+    memory_service = DualWriteMemoryService(
+        adk_memory=adk_memory,
+        openmemory_url=settings.openmemory_url,
+        tenant_id=user_ctx.tenant_id or "default",
+        api_key=settings.openmemory_api_key,
+    )
+    
+    # 3. Qdrant tool (on-demand documents)
     knowledge_tool = QueryKnowledgeBaseTool(
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
@@ -78,16 +91,25 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     except Exception as e:
         logger.warning("Failed to load A2A tools in assistant.py", error=str(e))
     
-    # Build root agent with pre-loaded A2A tools
+    # Build root agent with tricapa memory + instructions
     agent = build_root_agent(
         mcp_adapter=mcp_adapter,
-        memory_service=memory_service,
+        memory_service=memory_service,  # DualWriteMemoryService
         user_context=user_ctx,
         config={
             "model": settings.adk_model,
+            "instructions": TRICAPA_MEMORY_INSTRUCTIONS,  # Memory system instructions
         },
-        knowledge_tool=knowledge_tool,  # Pass the tenant-aware knowledge tool
-        a2a_tools=a2a_tools,  # Pass pre-loaded A2A tools
+        knowledge_tool=knowledge_tool,  # Qdrant knowledge base
+        a2a_tools=a2a_tools,  # A2A tools
+    )
+    
+    logger.info(
+        "Agent built with tricapa memory",
+        tenant_id=user_ctx.tenant_id,
+        user_id=user_ctx.sub,
+        memory_backend="dual_write",
+        openmemory_enabled=settings.openmemory_enabled
     )
     
     return agent, memory_service

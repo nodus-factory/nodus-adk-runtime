@@ -29,9 +29,18 @@ class Settings(BaseSettings):
     # MCP Gateway
     mcp_gateway_url: str = "http://mcp-gateway:7443"
 
-    # Memory Layer
+    # Memory Layer - Qdrant (documents/RAG)
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: Optional[str] = None
+    
+    # Memory Layer - Tricapa Configuration
+    adk_memory_backend: str = "database"  # database | inmemory
+    adk_memory_preload_limit: int = 3  # Max memories loaded automatically
+    
+    # OpenMemory (via MCP - long-term episodic/semantic)
+    openmemory_enabled: bool = True
+    openmemory_url: str = "http://openmemory:8080"
+    openmemory_api_key: Optional[str] = None
 
     # LiteLLM Proxy (unified AI gateway for ALL models)
     litellm_proxy_api_base: str = "http://litellm:4000"
