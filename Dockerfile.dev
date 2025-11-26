@@ -20,7 +20,9 @@ RUN pip install --no-cache-dir \
     opentelemetry-semantic-conventions==0.58b0 \
     opentelemetry-instrumentation==0.58b0 \
     opentelemetry-instrumentation-httpx==0.58b0 \
-    opentelemetry-instrumentation-asyncio==0.58b0
+    opentelemetry-instrumentation-asyncio==0.58b0 \
+    litellm>=1.80.0 \
+    langfuse
 
 # Expose port
 EXPOSE 8080
