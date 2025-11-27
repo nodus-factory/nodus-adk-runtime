@@ -104,6 +104,7 @@ class MCPAdapter:
                 headers={
                     "Authorization": f"Bearer {context.raw_token}",
                     "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",  # Required by some MCP servers (OpenMemory)
                 },
             )
             response.raise_for_status()
@@ -209,6 +210,7 @@ class MCPAdapter:
                 headers={
                     "Authorization": f"Bearer {context.raw_token}",
                     "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",  # Required by some MCP servers (OpenMemory)
                 },
             )
             response.raise_for_status()

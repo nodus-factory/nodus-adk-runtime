@@ -63,12 +63,15 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     )
     
     # 2. Wrap with DualWriteMemoryService (writes to OpenMemory too)
-    memory_service = DualWriteMemoryService(
-        adk_memory=adk_memory,
-        openmemory_url=settings.openmemory_url,
-        tenant_id=user_ctx.tenant_id or "default",
-        api_key=settings.openmemory_api_key,
-    )
+    # TEMPORARILY DISABLED: OpenMemory 2.0 uses MCP-only interface, REST API gives 404
+    # We will rely on explicit MCP tool calls for long-term memory
+    # memory_service = DualWriteMemoryService(
+    #     adk_memory=adk_memory,
+    #     openmemory_url=settings.openmemory_url,
+    #     tenant_id=user_ctx.tenant_id or "default",
+    #     api_key=settings.openmemory_api_key,
+    # )
+    memory_service = adk_memory  # Use only Postgres memory for now
     
     # 3. Qdrant tool (on-demand documents)
     knowledge_tool = QueryKnowledgeBaseTool(
