@@ -35,7 +35,7 @@ class NodusMcpTool(BaseTool):
         Initialize MCP tool.
         
         Args:
-            name: Tool name
+            name: Tool name (will be the original tool name without any prefix)
             description: Tool description
             server: MCP server ID
             mcp_adapter: MCP adapter instance
@@ -47,6 +47,8 @@ class NodusMcpTool(BaseTool):
         self.mcp_adapter = mcp_adapter
         self.user_context = user_context
         self.input_schema = input_schema or {}
+        # Store the original tool name (without prefix) for MCP server calls
+        self.original_tool_name = name
     
     def _get_declaration(self) -> Optional[types.FunctionDeclaration]:
         """Get function declaration for this tool."""
@@ -101,10 +103,11 @@ class NodusMcpTool(BaseTool):
             args=args,
         )
         
-        # Call MCP adapter with args directly
+        # Call MCP adapter with original tool name (without prefix)
+        # The MCP server only knows the original tool name
         result = await self.mcp_adapter.call_tool(
             server=self.server,
-            tool=self.name,
+            tool=self.original_tool_name,
             args=args,
             context=self.user_context,
         )
@@ -224,6 +227,7 @@ class NodusMcpToolset(BaseToolset):
                             continue
                         
                         # Create NodusMcpTool for each individual tool
+                        # NOTE: Don't apply tool_name_prefix manually - BaseToolset handles it
                         tool = NodusMcpTool(
                             name=tool_name,
                             description=tool_def.get("description", f"{tool_name} from {server_id}"),
