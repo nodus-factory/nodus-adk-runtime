@@ -44,6 +44,15 @@
       "timeout": 30,
       "description": "Interactive multiplication with HITL user input",
       "capabilities": ["multiply_with_confirmation", "execute_multiplication"]
+    },
+    {
+      "name": "google_workspace_agent",
+      "endpoint": "http://agent-pool:8000/google_workspace/a2a",
+      "card_url": "http://agent-pool:8000/google_workspace/",
+      "enabled": true,
+      "timeout": 45,
+      "description": "Specialist in Google Workspace (Gmail, Calendar, Drive, Docs, Sheets). Understands Gmail search syntax and chains operations using OpenMemory.",
+      "capabilities": ["search_emails", "read_email", "send_email", "list_calendar", "search_drive", "read_document"]
     }
   ],
   "discovery": {
