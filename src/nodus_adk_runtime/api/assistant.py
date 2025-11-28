@@ -62,16 +62,14 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
         database_url=settings.database_url
     )
     
-    # 2. Wrap with DualWriteMemoryService (writes to OpenMemory too)
-    # TEMPORARILY DISABLED: OpenMemory 2.0 uses MCP-only interface, REST API gives 404
-    # We will rely on explicit MCP tool calls for long-term memory
-    # memory_service = DualWriteMemoryService(
-    #     adk_memory=adk_memory,
-    #     openmemory_url=settings.openmemory_url,
-    #     tenant_id=user_ctx.tenant_id or "default",
-    #     api_key=settings.openmemory_api_key,
-    # )
-    memory_service = adk_memory  # Use only Postgres memory for now
+    # 2. Wrap with DualWriteMemoryService (writes to OpenMemory via MCP)
+    # OpenMemory 2.0 is now accessed via MCP Gateway using the 'store' tool
+    memory_service = DualWriteMemoryService(
+        adk_memory=adk_memory,
+        mcp_adapter=mcp_adapter,
+        user_context=user_ctx,
+    )
+    # memory_service = adk_memory  # Old fallback disabled
     
     # 3. Qdrant tool (on-demand documents)
     knowledge_tool = QueryKnowledgeBaseTool(
@@ -476,6 +474,13 @@ async def create_session(
         
         # Save session to memory after processing
         try:
+            # RELOAD session to get latest events
+            session = await session_service.get_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session.id,
+            )
+            
             await memory_service.add_session_to_memory(session)
             logger.info("Session saved to memory (create)", session_id=session.id, tenant_id=user_ctx.tenant_id)
         except Exception as e:
@@ -834,6 +839,14 @@ async def add_message(
         
         # Save session to memory after processing
         try:
+            # RELOAD session to get latest events (including the ones just generated)
+            # The local 'session' object might be stale after run_async
+            session = await session_service.get_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session.id,
+            )
+            
             await memory_service.add_session_to_memory(session)
             logger.info("Session saved to memory (add_message)", session_id=session.id, tenant_id=user_ctx.tenant_id)
         except Exception as e:

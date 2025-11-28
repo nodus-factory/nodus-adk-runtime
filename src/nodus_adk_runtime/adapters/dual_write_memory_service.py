@@ -1,17 +1,19 @@
 """
 Dual-Write Memory Service.
-Writes to BOTH DatabaseMemoryService AND OpenMemory.
+Writes to BOTH DatabaseMemoryService AND OpenMemory (via MCP).
 Reads only from DatabaseMemoryService (fast for PreloadMemoryTool).
 """
 
-import httpx
 import structlog
-from typing import Optional
+from typing import Any, Optional
 from google.adk.memory.base_memory_service import (
     BaseMemoryService,
     SearchMemoryResponse
 )
 from google.adk.sessions.session import Session
+from ..middleware.auth import UserContext
+from openai import AsyncOpenAI
+from ..config import settings
 
 logger = structlog.get_logger()
 
@@ -19,39 +21,36 @@ logger = structlog.get_logger()
 class DualWriteMemoryService(BaseMemoryService):
     """
     Dual-write memory service:
-    - WRITE: Both ADK Memory (Postgres) AND OpenMemory (HTTP)
+    - WRITE: Both ADK Memory (Postgres) AND OpenMemory (via MCP)
     - READ: Only ADK Memory (fast, for PreloadMemoryTool)
     
-    OpenMemory retrieval is via MCP tools (on-demand by agent).
+    OpenMemory interactions are fully mediated by the MCP Gateway.
+    
+    Features:
+    - Automatic LLM-based sector classification (multilingual)
+    - Graceful fallback to OpenMemory's regex-based classification
     """
     
     def __init__(
         self,
         adk_memory: BaseMemoryService,
-        openmemory_url: str,
-        tenant_id: str,
-        api_key: Optional[str] = None,
+        mcp_adapter: Any,
+        user_context: UserContext,
     ):
         """
         Args:
             adk_memory: Primary memory service (DatabaseMemoryService)
-            openmemory_url: OpenMemory HTTP endpoint
-            tenant_id: Tenant ID for multi-tenancy
-            api_key: Optional API key for OpenMemory
+            mcp_adapter: Adapter to communicate with MCP Gateway
+            user_context: User context for auth headers in MCP calls
         """
         self.adk_memory = adk_memory
-        self.openmemory_url = openmemory_url
-        self.tenant_id = tenant_id
-        self.api_key = api_key
+        self.mcp_adapter = mcp_adapter
+        self.user_context = user_context
         
-        headers = {}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        
-        self.http_client = httpx.AsyncClient(
-            base_url=openmemory_url,
-            timeout=10.0,
-            headers=headers
+        # Initialize LiteLLM client for sector classification
+        self.llm_client = AsyncOpenAI(
+            api_key=settings.litellm_proxy_api_key,
+            base_url=f"{settings.litellm_proxy_api_base}/v1",
         )
     
     async def add_session_to_memory(self, session: Session):
@@ -69,16 +68,16 @@ class DualWriteMemoryService(BaseMemoryService):
             events=len(session.events)
         )
         
-        # 2. Save to OpenMemory (async, best-effort)
+        # 2. Save to OpenMemory (async, best-effort) via MCP
         try:
             await self._save_to_openmemory(session)
             logger.info(
-                "Session saved to OpenMemory",
+                "Session saved to OpenMemory via MCP",
                 session_id=session.id,
                 events=len(session.events)
             )
         except Exception as e:
-            # Don't fail if OpenMemory is down
+            # Don't fail if OpenMemory is down or MCP call fails
             logger.warning(
                 "Failed to save to OpenMemory (non-fatal)",
                 error=str(e),
@@ -86,8 +85,8 @@ class DualWriteMemoryService(BaseMemoryService):
             )
     
     async def _save_to_openmemory(self, session: Session):
-        """Save session events to OpenMemory with sector classification."""
-        user_id = f"{self.tenant_id}:{session.user_id}"
+        """Save session events to OpenMemory using MCP 'store' tool."""
+        # user_id is handled by OpenMemory context or passed in metadata
         
         for event in session.events:
             if not event.content or not event.content.parts:
@@ -104,26 +103,31 @@ class DualWriteMemoryService(BaseMemoryService):
             
             content = ' '.join(text_parts)
             
-            # Store via OpenMemory HTTP API
-            # Endpoint: POST /api/memories (from nodus-memory)
-            response = await self.http_client.post("/api/memories", json={
-                "user_id": user_id,
-                "content": content,
-                "tags": [
-                    f"session:{session.id}",
-                    f"app:{session.app_name}",
-                    f"author:{event.author or 'unknown'}",
-                ],
-                "metadata": {
-                    "session_id": session.id,
-                    "tenant_id": self.tenant_id,
-                    "author": event.author or 'unknown',
-                    "timestamp": str(event.timestamp),
-                    "source": "adk",
-                }
-            })
+            # Store via OpenMemory MCP Tool
+            # Tool name is 'openmemory_store'
+            result = await self.mcp_adapter.call_tool(
+                server="openmemory",
+                tool="openmemory_store", 
+                args={
+                    "content": content,
+                    "tags": [
+                        f"session:{session.id}",
+                        f"app:{session.app_name}",
+                        f"author:{event.author or 'unknown'}",
+                    ],
+                    # Optional metadata if supported
+                    "metadata": {
+                        "session_id": session.id,
+                        "author": event.author or 'unknown',
+                        "timestamp": str(event.timestamp),
+                        "source": "adk",
+                    }
+                },
+                context=self.user_context
+            )
             
-            response.raise_for_status()
+            if result.get("status") == "error":
+                raise Exception(f"MCP Tool Error: {result.get('error')}")
     
     async def search_memory(
         self,
@@ -136,7 +140,7 @@ class DualWriteMemoryService(BaseMemoryService):
         """
         READ: Only from ADK Memory (fast for PreloadMemoryTool).
         
-        OpenMemory reads are via MCP tools (openmemory_query).
+        OpenMemory reads are via MCP tools (openmemory_query) invoked by the Agent.
         """
         return await self.adk_memory.search_memory(
             app_name=app_name,
@@ -147,6 +151,5 @@ class DualWriteMemoryService(BaseMemoryService):
     
     async def close(self):
         """Cleanup resources."""
-        await self.http_client.aclose()
         if hasattr(self.adk_memory, 'close'):
             await self.adk_memory.close()

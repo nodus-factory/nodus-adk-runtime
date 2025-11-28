@@ -31,9 +31,9 @@
       "name": "email_agent",
       "endpoint": "http://agent-pool:8000/email/a2a",
       "card_url": "http://agent-pool:8000/email/",
-      "enabled": true,
+      "enabled": false,
       "timeout": 30,
-      "description": "Send emails with HITL confirmation",
+      "description": "Send emails with HITL confirmation (DISABLED: use Google Workspace Gmail tools instead)",
       "capabilities": ["send_email", "check_inbox"]
     },
     {
