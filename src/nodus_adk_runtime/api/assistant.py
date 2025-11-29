@@ -12,7 +12,7 @@ import uuid
 from .schemas import SessionCreateRequest, MessageRequest, SessionResponse
 from ..middleware.auth import get_current_user, UserContext
 from ..config import settings
-from ..langfuse_tracer import trace_agent_execution
+from ..langfuse_tracer import start_trace, end_trace
 
 logger = structlog.get_logger()
 
@@ -121,7 +121,6 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
 
 
 @router.post("/sessions", response_model=SessionResponse)
-@trace_agent_execution("create_session")
 async def create_session(
     request: SessionCreateRequest,
     user_ctx: UserContext = Depends(get_current_user),
@@ -132,6 +131,15 @@ async def create_session(
     If conversation_id is provided, reuses that conversation.
     Otherwise, creates a new session.
     """
+    # Start Langfuse trace
+    session_id_for_trace = request.conversation_id or f"session_{user_ctx.sub}"
+    trace = start_trace(
+        "create_session",
+        user_ctx=user_ctx,
+        session_id=session_id_for_trace,
+        input_data={"message": request.message[:100] if request.message else None}
+    )
+    
     logger.info(
         "Creating session",
         user_id=user_ctx.sub,
@@ -488,6 +496,9 @@ async def create_session(
         except Exception as e:
             logger.error("Failed to save session to memory", error=str(e), session_id=session.id)
         
+        # End Langfuse trace (success)
+        end_trace(trace, success=True)
+        
         return SessionResponse(
             session_id=session_id,
             conversation_id=conversation_id,
@@ -502,6 +513,10 @@ async def create_session(
         
     except Exception as e:
         logger.error("Failed to create session", error=str(e), user_id=user_ctx.sub)
+        
+        # End Langfuse trace (error)
+        end_trace(trace, success=False, error=str(e))
+        
         # Fallback to stub response
         session_id = request.conversation_id or f"session_{user_ctx.sub}_{uuid.uuid4().hex[:8]}"
         conversation_id = request.conversation_id or session_id
@@ -515,7 +530,6 @@ async def create_session(
 
 
 @router.post("/sessions/{session_id}/messages", response_model=SessionResponse)
-@trace_agent_execution("add_message")
 async def add_message(
     session_id: str,
     request: MessageRequest,
@@ -524,6 +538,14 @@ async def add_message(
     """
     Add a message to an existing session.
     """
+    # Start Langfuse trace
+    trace = start_trace(
+        "add_message",
+        user_ctx=user_ctx,
+        session_id=session_id,
+        input_data={"message": request.message[:100] if request.message else None}
+    )
+    
     logger.info(
         "Adding message to session",
         session_id=session_id,
@@ -855,6 +877,9 @@ async def add_message(
         except Exception as e:
             logger.error("Failed to save session to memory", error=str(e), session_id=session.id)
         
+        # End Langfuse trace (success)
+        end_trace(trace, success=True)
+        
         return SessionResponse(
             session_id=session_id,
             conversation_id=session_id,
@@ -870,6 +895,10 @@ async def add_message(
     except Exception as e:
         import traceback
         logger.error("Failed to add message", error=str(e), session_id=session_id, traceback=traceback.format_exc())
+        
+        # End Langfuse trace (error)
+        end_trace(trace, success=False, error=str(e))
+        
         # Fallback to stub response
         return SessionResponse(
             session_id=session_id,
