@@ -12,6 +12,7 @@ import uuid
 from .schemas import SessionCreateRequest, MessageRequest, SessionResponse
 from ..middleware.auth import get_current_user, UserContext
 from ..config import settings
+from ..langfuse_tracer import trace_agent_execution
 
 logger = structlog.get_logger()
 
@@ -120,6 +121,7 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
 
 
 @router.post("/sessions", response_model=SessionResponse)
+@trace_agent_execution("create_session")
 async def create_session(
     request: SessionCreateRequest,
     user_ctx: UserContext = Depends(get_current_user),
@@ -513,6 +515,7 @@ async def create_session(
 
 
 @router.post("/sessions/{session_id}/messages", response_model=SessionResponse)
+@trace_agent_execution("add_message")
 async def add_message(
     session_id: str,
     request: MessageRequest,
