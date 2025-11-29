@@ -100,7 +100,7 @@ def start_trace(
     user_email = getattr(user_ctx, 'email', None) if user_ctx else None
     
     try:
-        trace = client.trace(
+        span = client.start_span(
             name=operation_name,
             user_id=user_id,
             session_id=session_id,
@@ -117,28 +117,28 @@ def start_trace(
             "user_id": user_id,
             "session_id": session_id,
         })
-        return trace
+        return span
     except Exception as e:
         logger.warning(f"Failed to start Langfuse trace: {e}")
         return None
 
 
 def end_trace(
-    trace: Optional[Any],
+    span: Optional[Any],
     success: bool = True,
     error: Optional[str] = None,
     output_data: Optional[Dict] = None,
 ) -> None:
     """
-    End a Langfuse trace.
+    End a Langfuse span.
     
     Args:
-        trace: Langfuse trace object from start_trace()
+        span: Langfuse span object from start_trace()
         success: Whether the operation succeeded
         error: Error message if operation failed
         output_data: Optional output data to log
     """
-    if trace is None:
+    if span is None:
         return
     
     try:
@@ -147,16 +147,15 @@ def end_trace(
         if error:
             output["error"] = error
         
-        trace.update(
+        span.end(
             output=output,
-            end_time=datetime.now(),
             level="ERROR" if not success else "DEFAULT",
         )
-        logger.info(f"🔍 Langfuse trace ended: {trace.name} (success={success})")
+        logger.info(f"🔍 Langfuse span ended: {span.name} (success={success})")
     except Exception as e:
-        logger.warning(f"Failed to end Langfuse trace: {e}")
+        logger.warning(f"Failed to end Langfuse span: {e}")
     
-    # Flush to ensure trace is sent
+    # Flush to ensure span is sent
     try:
         client = get_langfuse_client()
         if client:
