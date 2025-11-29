@@ -102,9 +102,9 @@ def start_trace(
     try:
         span = client.start_span(
             name=operation_name,
-            user_id=user_id,
-            session_id=session_id,
             metadata={
+                "user_id": user_id,
+                "session_id": session_id,
                 "tenant_id": tenant_id,
                 "user_email": user_email,
                 "operation": operation_name,
