@@ -154,7 +154,7 @@ def end_trace(
         )
         # End the span
         span.end()
-        logger.info(f"🔍 Langfuse span ended: {span.name} (success={success})")
+        logger.info(f"🔍 Langfuse span ended (success={success})")
     except Exception as e:
         logger.warning(f"Failed to end Langfuse span: {e}")
     
