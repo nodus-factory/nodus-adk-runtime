@@ -147,10 +147,13 @@ def end_trace(
         if error:
             output["error"] = error
         
-        span.end(
+        # Update span with output and level before ending
+        span.update(
             output=output,
             level="ERROR" if not success else "DEFAULT",
         )
+        # End the span
+        span.end()
         logger.info(f"🔍 Langfuse span ended: {span.name} (success={success})")
     except Exception as e:
         logger.warning(f"Failed to end Langfuse span: {e}")
