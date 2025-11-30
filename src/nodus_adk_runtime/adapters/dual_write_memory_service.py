@@ -86,7 +86,7 @@ class DualWriteMemoryService(BaseMemoryService):
     
     async def _save_to_openmemory(self, session: Session):
         """Save session events to OpenMemory using MCP 'store' tool."""
-        # user_id is handled by OpenMemory context or passed in metadata
+        # user_id is explicitly passed as "{tenant_id}:{user_id}" for multi-tenancy
         
         for event in session.events:
             if not event.content or not event.content.parts:
@@ -110,6 +110,7 @@ class DualWriteMemoryService(BaseMemoryService):
                 tool="openmemory_store", 
                 args={
                     "content": content,
+                    "user_id": f"{self.user_context.tenant_id}:{self.user_context.sub}",
                     "tags": [
                         f"session:{session.id}",
                         f"app:{session.app_name}",
