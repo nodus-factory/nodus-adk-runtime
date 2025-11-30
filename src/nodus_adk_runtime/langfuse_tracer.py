@@ -100,11 +100,13 @@ def start_trace(
     user_email = getattr(user_ctx, 'email', None) if user_ctx else None
     
     try:
-        span = client.start_span(
+        # Use trace() instead of start_span() for top-level operations
+        # This creates a proper trace (like LiteLLM does) not just a span
+        trace = client.trace(
             name=operation_name,
+            user_id=user_id,
+            session_id=session_id,
             metadata={
-                "user_id": user_id,
-                "session_id": session_id,
                 "tenant_id": tenant_id,
                 "user_email": user_email,
                 "operation": operation_name,
@@ -117,28 +119,28 @@ def start_trace(
             "user_id": user_id,
             "session_id": session_id,
         })
-        return span
+        return trace
     except Exception as e:
         logger.warning(f"Failed to start Langfuse trace: {e}")
         return None
 
 
 def end_trace(
-    span: Optional[Any],
+    trace: Optional[Any],
     success: bool = True,
     error: Optional[str] = None,
     output_data: Optional[Dict] = None,
 ) -> None:
     """
-    End a Langfuse span.
+    End a Langfuse trace.
     
     Args:
-        span: Langfuse span object from start_trace()
+        trace: Langfuse trace object from start_trace()
         success: Whether the operation succeeded
         error: Error message if operation failed
         output_data: Optional output data to log
     """
-    if span is None:
+    if trace is None:
         return
     
     try:
@@ -147,18 +149,16 @@ def end_trace(
         if error:
             output["error"] = error
         
-        # Update span with output and level before ending
-        span.update(
+        # Update trace with output and status
+        trace.update(
             output=output,
-            level="ERROR" if not success else "DEFAULT",
+            status_message=error if error else "success",
         )
-        # End the span
-        span.end()
-        logger.info(f"🔍 Langfuse span ended (success={success})")
+        logger.info(f"🔍 Langfuse trace ended (success={success})")
     except Exception as e:
-        logger.warning(f"Failed to end Langfuse span: {e}")
+        logger.warning(f"Failed to end Langfuse trace: {e}")
     
-    # Flush to ensure span is sent
+    # Flush to ensure trace is sent
     try:
         client = get_langfuse_client()
         if client:

@@ -69,7 +69,10 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
         adk_memory=adk_memory,
         mcp_adapter=mcp_adapter,
         user_context=user_ctx,
+        batch_interval_seconds=300,  # 5 minuts
     )
+    # Start background processor for batching OpenMemory writes
+    memory_service.start_background_processor()
     # memory_service = adk_memory  # Old fallback disabled
     
     # 3. Qdrant tool (on-demand documents)
