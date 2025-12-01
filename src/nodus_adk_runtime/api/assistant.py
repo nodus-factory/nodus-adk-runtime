@@ -52,6 +52,7 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
     from nodus_adk_runtime.adapters.database_memory_service import DatabaseMemoryService
     from nodus_adk_runtime.adapters.dual_write_memory_service import DualWriteMemoryService
     from nodus_adk_runtime.tools.query_knowledge_tool import QueryKnowledgeBaseTool
+    from nodus_adk_runtime.tools.query_memory_tool import QueryMemoryTool
     from nodus_adk_runtime.prompts.memory_instructions import TRICAPA_MEMORY_INSTRUCTIONS
     from nodus_adk_agents.root_agent import build_root_agent
     
@@ -63,19 +64,29 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
         database_url=settings.database_url
     )
     
-    # 2. Wrap with DualWriteMemoryService (writes to OpenMemory via MCP)
-    # OpenMemory 2.0 is now accessed via MCP Gateway using the 'store' tool
+    # 2. Wrap with DualWriteMemoryService (writes to Qdrant directly)
+    # Direct Qdrant access avoids JWT expiration issues
     memory_service = DualWriteMemoryService(
         adk_memory=adk_memory,
-        mcp_adapter=mcp_adapter,
+        qdrant_url=settings.qdrant_url,
+        qdrant_api_key=settings.qdrant_api_key,
         user_context=user_ctx,
-        batch_interval_seconds=300,  # 5 minuts
+        batch_interval_seconds=300,  # 5 minutes
     )
-    # Start background processor for batching OpenMemory writes
+    # Start background processor for batching Qdrant memory writes
     memory_service.start_background_processor()
     # memory_service = adk_memory  # Old fallback disabled
     
-    # 3. Qdrant tool (on-demand documents)
+    # 3. Query Memory Tool (CAPA 2: Semantic memory from Qdrant)
+    memory_tool = QueryMemoryTool(
+        qdrant_url=settings.qdrant_url,
+        qdrant_api_key=settings.qdrant_api_key,
+        openai_api_key=settings.openai_api_key,
+        tenant_id=user_ctx.tenant_id or "default",
+        user_id=user_ctx.sub,
+    )
+    
+    # 4. Query Knowledge Base Tool (CAPA 3: Documents from Qdrant)
     knowledge_tool = QueryKnowledgeBaseTool(
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
@@ -108,7 +119,8 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
             "model": settings.adk_model,
             "instructions": TRICAPA_MEMORY_INSTRUCTIONS,  # Memory system instructions
         },
-        knowledge_tool=knowledge_tool,  # Qdrant knowledge base
+        memory_tool=memory_tool,  # CAPA 2: Semantic memory (Qdrant)
+        knowledge_tool=knowledge_tool,  # CAPA 3: Knowledge base (Qdrant)
         a2a_tools=a2a_tools,  # A2A tools
     )
     

@@ -95,12 +95,18 @@ class NodusMcpTool(BaseTool):
         Returns:
             Tool execution result
         """
+        # Auto-inject user_id for OpenMemory tools (multi-tenancy)
+        enriched_args = args.copy()
+        if self.server == "openmemory" and "user_id" not in enriched_args:
+            # Format: tenant_id:user_id (e.g., "default:12")
+            enriched_args["user_id"] = f"{self.user_context.tenant_id}:{self.user_context.sub}"
+        
         logger.info(
             "Executing MCP tool",
             tool=self.name,
             server=self.server,
             user_id=self.user_context.sub,
-            args=args,
+            args=enriched_args,
         )
         
         # Call MCP adapter with original tool name (without prefix)
@@ -108,7 +114,7 @@ class NodusMcpTool(BaseTool):
         result = await self.mcp_adapter.call_tool(
             server=self.server,
             tool=self.original_tool_name,
-            args=args,
+            args=enriched_args,
             context=self.user_context,
         )
         

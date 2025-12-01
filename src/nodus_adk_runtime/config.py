@@ -37,8 +37,9 @@ class Settings(BaseSettings):
     adk_memory_backend: str = "database"  # database | inmemory
     adk_memory_preload_limit: int = 3  # Max memories loaded automatically
     
-    # OpenMemory (via MCP - long-term episodic/semantic)
-    openmemory_enabled: bool = True
+    # OpenMemory (DEPRECATED - replaced by direct Qdrant for CAPA 2)
+    # Legacy config kept for backwards compatibility but not used
+    openmemory_enabled: bool = False
     openmemory_url: str = "http://openmemory:8080"
     openmemory_api_key: Optional[str] = None
 

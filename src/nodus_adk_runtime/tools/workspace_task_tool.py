@@ -95,12 +95,12 @@ class _WorkspaceTaskToolImpl:
         from nodus_adk_runtime.tools.workspace.context_builder import WorkspaceContextBuilder
         from nodus_adk_runtime.tools.workspace.planner import WorkspacePlanner
         from nodus_adk_runtime.tools.workspace.executor import WorkspaceExecutor
-        from nodus_adk_runtime.tools.workspace.memory_saver import WorkspaceMemorySaver
+        # from nodus_adk_runtime.tools.workspace.memory_saver import WorkspaceMemorySaver  # DISABLED
         
         self.context_builder = WorkspaceContextBuilder(mcp_adapter, user_context)
         self.planner = WorkspacePlanner(prompt_service)
         self.executor = WorkspaceExecutor(mcp_adapter, user_context)
-        self.memory_saver = WorkspaceMemorySaver(mcp_adapter, user_context)
+        # self.memory_saver = WorkspaceMemorySaver(mcp_adapter, user_context)  # DISABLED
         
         logger.info(
             "WorkspaceTaskTool initialized",
@@ -179,14 +179,16 @@ class _WorkspaceTaskToolImpl:
                 failed_steps=execution_results.get("failed_steps", 0)
             )
             
-            # PHASE 4: Save to Memory
-            logger.info("Phase 4: Saving to memory")
-            await self.memory_saver.save(
-                task=task,
-                plan=plan,
-                results=execution_results,
-                context=workspace_context
-            )
+            # PHASE 4: Save to Memory (DISABLED - OpenMemory replaced by automatic Qdrant batch)
+            # Memory is now automatically saved via DualWriteMemoryService background batch
+            # No need for explicit save here
+            logger.info("Phase 4: Memory save (automatic via background batch)")
+            # await self.memory_saver.save(
+            #     task=task,
+            #     plan=plan,
+            #     results=execution_results,
+            #     context=workspace_context
+            # )
             
             # Build final response
             response = {
