@@ -65,23 +65,41 @@ async def hitl_events_stream(
             while True:
                 # Wait for events (with timeout for heartbeat)
                 try:
-                    event: HITLEvent = await asyncio.wait_for(
+                    event = await asyncio.wait_for(
                         queue.get(),
                         timeout=30.0
                     )
                     
-                    logger.info(
-                        "Sending HITL event via SSE",
-                        user_id=user_id,
-                        event_type=event.event_type,
-                        event_id=event.event_id,
-                        metadata=event.metadata,
-                        action_data=event.action_data
-                    )
+                    # Obtener event_type (puede ser HITLEvent o SSEEvent para grabaciones)
+                    event_type = getattr(event, 'event_type', None)
+                    if event_type is None:
+                        # Si no tiene event_type, intentar como HITLEvent
+                        if hasattr(event, 'event_type'):
+                            event_type = event.event_type
+                        else:
+                            logger.warning("Event without event_type, skipping", user_id=user_id)
+                            continue
+                    
+                    # Logging (solo para HITL events que tienen event_id)
+                    if hasattr(event, 'event_id'):
+                        logger.info(
+                            "Sending HITL event via SSE",
+                            user_id=user_id,
+                            event_type=event_type,
+                            event_id=event.event_id,
+                            metadata=getattr(event, 'metadata', None),
+                            action_data=getattr(event, 'action_data', None)
+                        )
+                    else:
+                        logger.info(
+                            "Sending recording event via SSE",
+                            user_id=user_id,
+                            event_type=event_type
+                        )
                     
                     # Send event to client
                     yield {
-                        "event": event.event_type,
+                        "event": event_type,
                         "data": event.model_dump_json()
                     }
                     

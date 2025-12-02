@@ -118,8 +118,9 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
         config={
             "model": settings.adk_model,
             "instructions": TRICAPA_MEMORY_INSTRUCTIONS,  # Memory system instructions
+            "runtime_url": settings.runtime_url or "http://localhost:8080",
+            "recorder_url": settings.recorder_url or "http://localhost:5005",
         },
-        memory_tool=memory_tool,  # CAPA 2: Semantic memory (Qdrant)
         knowledge_tool=knowledge_tool,  # CAPA 3: Knowledge base (Qdrant)
         a2a_tools=a2a_tools,  # A2A tools
     )
@@ -318,12 +319,35 @@ async def create_session(
                     "HITL required detected in tool response",
                     agent=hitl_data.get('agent'),
                     action=hitl_data.get('action_description'),
+                    action_type=hitl_data.get('action'),
+                    action_keys=list(hitl_data.keys()) if isinstance(hitl_data, dict) else [],
+                    has_recorder_url=bool(hitl_data.get('recorder_url')),
                     session_id=session.id
                 )
                 break
         
-        # If HITL is required, create confirmation request and wait for user decision
-        if hitl_required and hitl_data:
+        # Special handling for RecorderTool: Pass data directly without confirmation
+        # Check for both 'action' === 'start_recording' and presence of 'recorder_url'
+        is_recorder_tool = (
+            hitl_required and hitl_data and (
+                hitl_data.get('action') == 'start_recording' or
+                bool(hitl_data.get('recorder_url')) or
+                (isinstance(hitl_data.get('ui_action'), dict) and hitl_data.get('ui_action', {}).get('type') == 'open_recorder')
+            )
+        )
+        
+        if is_recorder_tool:
+            logger.info(
+                "RecorderTool detected - passing data directly to frontend",
+                recording_id=hitl_data.get('recording_id'),
+                recorder_url=hitl_data.get('recorder_url'),
+                action=hitl_data.get('action'),
+                ui_action_type=hitl_data.get('ui_action', {}).get('type') if isinstance(hitl_data.get('ui_action'), dict) else None
+            )
+            # Use the message from the tool or generate a default one
+            reply = hitl_data.get('message_to_user', reply)
+        # If HITL is required (for other tools), create confirmation request and wait for user decision
+        elif hitl_required and hitl_data:
             from nodus_adk_runtime.services.hitl_service import get_hitl_service
             import uuid as uuid_lib
             
@@ -511,6 +535,33 @@ async def create_session(
         except Exception as e:
             logger.error("Failed to save session to memory", error=str(e), session_id=session.id)
         
+        # Build response metadata - include hitl_data if it's a RecorderTool
+        response_metadata = {**request.metadata}
+        is_recorder_tool_response = (
+            hitl_required and hitl_data and (
+                hitl_data.get('action') == 'start_recording' or
+                bool(hitl_data.get('recorder_url')) or
+                (isinstance(hitl_data.get('ui_action'), dict) and hitl_data.get('ui_action', {}).get('type') == 'open_recorder')
+            )
+        )
+        if is_recorder_tool_response:
+            # Include all RecorderTool fields in metadata for Llibreta
+            logger.info(
+                "Including RecorderTool fields in response metadata",
+                recording_id=hitl_data.get('recording_id'),
+                recorder_url=hitl_data.get('recorder_url')
+            )
+            response_metadata.update({
+                '_hitl_required': True,
+                'ui_action': hitl_data.get('ui_action'),
+                'recording_id': hitl_data.get('recording_id'),
+                'recorder_url': hitl_data.get('recorder_url'),
+                'recording_type': hitl_data.get('recording_type'),
+                'title': hitl_data.get('title'),
+                'duration_minutes': hitl_data.get('duration_minutes'),
+                'auto_transcribe': hitl_data.get('auto_transcribe'),
+            })
+        
         # End Langfuse trace (success)
         end_trace(trace, success=True)
         
@@ -518,7 +569,7 @@ async def create_session(
             session_id=session_id,
             conversation_id=conversation_id,
             reply=reply,
-            metadata=request.metadata,
+            metadata=response_metadata,
             memories=memories,
             citations=citations,
             structured_data=structured_data,
@@ -698,12 +749,35 @@ async def add_message(
                     "HITL required detected in tool response",
                     agent=hitl_data.get('agent'),
                     action=hitl_data.get('action_description'),
+                    action_type=hitl_data.get('action'),
+                    action_keys=list(hitl_data.keys()) if isinstance(hitl_data, dict) else [],
+                    has_recorder_url=bool(hitl_data.get('recorder_url')),
                     session_id=session.id
                 )
                 break
         
-        # If HITL is required, create confirmation request and wait for user decision
-        if hitl_required and hitl_data:
+        # Special handling for RecorderTool: Pass data directly without confirmation
+        # Check for both 'action' === 'start_recording' and presence of 'recorder_url'
+        is_recorder_tool = (
+            hitl_required and hitl_data and (
+                hitl_data.get('action') == 'start_recording' or
+                bool(hitl_data.get('recorder_url')) or
+                (isinstance(hitl_data.get('ui_action'), dict) and hitl_data.get('ui_action', {}).get('type') == 'open_recorder')
+            )
+        )
+        
+        if is_recorder_tool:
+            logger.info(
+                "RecorderTool detected - passing data directly to frontend",
+                recording_id=hitl_data.get('recording_id'),
+                recorder_url=hitl_data.get('recorder_url'),
+                action=hitl_data.get('action'),
+                ui_action_type=hitl_data.get('ui_action', {}).get('type') if isinstance(hitl_data.get('ui_action'), dict) else None
+            )
+            # Use the message from the tool or generate a default one
+            reply = hitl_data.get('message_to_user', reply)
+        # If HITL is required (for other tools), create confirmation request and wait for user decision
+        elif hitl_required and hitl_data:
             from nodus_adk_runtime.services.hitl_service import get_hitl_service
             import uuid as uuid_lib
             
@@ -892,6 +966,33 @@ async def add_message(
         except Exception as e:
             logger.error("Failed to save session to memory", error=str(e), session_id=session.id)
         
+        # Build response metadata - include hitl_data if it's a RecorderTool
+        response_metadata = {**request.metadata}
+        is_recorder_tool_response = (
+            hitl_required and hitl_data and (
+                hitl_data.get('action') == 'start_recording' or
+                bool(hitl_data.get('recorder_url')) or
+                (isinstance(hitl_data.get('ui_action'), dict) and hitl_data.get('ui_action', {}).get('type') == 'open_recorder')
+            )
+        )
+        if is_recorder_tool_response:
+            # Include all RecorderTool fields in metadata for Llibreta
+            logger.info(
+                "Including RecorderTool fields in response metadata",
+                recording_id=hitl_data.get('recording_id'),
+                recorder_url=hitl_data.get('recorder_url')
+            )
+            response_metadata.update({
+                '_hitl_required': True,
+                'ui_action': hitl_data.get('ui_action'),
+                'recording_id': hitl_data.get('recording_id'),
+                'recorder_url': hitl_data.get('recorder_url'),
+                'recording_type': hitl_data.get('recording_type'),
+                'title': hitl_data.get('title'),
+                'duration_minutes': hitl_data.get('duration_minutes'),
+                'auto_transcribe': hitl_data.get('auto_transcribe'),
+            })
+        
         # End Langfuse trace (success)
         end_trace(trace, success=True)
         
@@ -899,7 +1000,7 @@ async def add_message(
             session_id=session_id,
             conversation_id=session_id,
             reply=reply,
-            metadata=request.metadata,
+            metadata=response_metadata,
             memories=memories,
             citations=citations,
             structured_data=structured_data,

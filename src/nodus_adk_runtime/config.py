@@ -77,7 +77,18 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # CORS
-    cors_origins: str = "http://localhost:5002,http://localhost:5001,http://localhost:3000"
+    cors_origins: str = "http://localhost:5002,http://localhost:5001,http://localhost:3000,http://localhost:5005,http://localhost:5173"
+    
+    # S3/MinIO Configuration
+    s3_endpoint_url: str = "http://minio:9000"
+    s3_bucket: str = "nodus"
+    aws_access_key_id: str = "minioadmin"
+    aws_secret_access_key: str = "minioadmin"
+    s3_region: str = "us-east-1"
+    
+    # Recorder Configuration
+    runtime_url: str = "http://localhost:8080"
+    recorder_url: str = "http://localhost:5005"
 
     class Config:
         env_file = ".env"
