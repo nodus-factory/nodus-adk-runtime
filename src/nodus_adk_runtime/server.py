@@ -48,6 +48,10 @@ def create_app() -> FastAPI:
     # HITL router
     from .api import hitl
     app.include_router(hitl.router)
+    
+    # Recording router
+    from .api import recording
+    app.include_router(recording.router)
 
     @app.get("/health")
     async def health():
