@@ -27,6 +27,9 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
 security = HTTPBearer(auto_error=False)
 
+# Máximo número de caracteres de la transcripción a enviar en la respuesta
+MAX_TRANSCRIPT_PREVIEW_LENGTH = 500
+
 
 async def get_current_user_with_query_fallback(
     request: Request,
@@ -380,10 +383,12 @@ Responde en formato JSON:
     except Exception as e:
         logger.error("Failed to process with agent", recording_id=recording_id, error=str(e))
         # Retornar estructura básica en caso de error
+        # Incluir flag para indicar que el agente falló
         return {
             "summary": f"Error al procesar: {str(e)}",
             "action_items": [],
-            "topics": []
+            "topics": [],
+            "agent_failed": True  # Flag para indicar que el agente falló
         }
 
 
@@ -490,7 +495,8 @@ async def notify_completion(
     user_id: str,
     recording_id: str,
     title: str,
-    result: Dict[str, Any]
+    result: Dict[str, Any],
+    transcript: Optional[str] = None
 ) -> None:
     """
     Notificar a Llibreta vía SSE sobre la finalización de la grabación.
@@ -503,6 +509,7 @@ async def notify_completion(
         recording_id: ID de la grabación
         title: Título de la grabación
         result: Resultado del procesamiento (summary, action_items, topics)
+        transcript: Transcripción del audio (se usará en lugar del summary si está disponible)
     """
     logger.info(
         "Notifying recording completion via SSE",
@@ -514,6 +521,40 @@ async def notify_completion(
     try:
         # Obtener la cola de eventos del usuario (mismo sistema que HITL)
         queue = get_user_queue(user_id)
+        
+        # Usar transcripción truncada en lugar del resumen si está disponible
+        # Priorizar transcript SIEMPRE, especialmente si el agente falló o el summary contiene un error
+        agent_failed = result.get("agent_failed", False)
+        summary_text = result.get("summary", "")
+        is_error_summary = "Error al procesar" in summary_text or "error" in summary_text.lower()
+        
+        # Si hay transcripción disponible, usarla siempre (especialmente si el agente falló)
+        if transcript and transcript.strip():
+            # Truncar transcripción al principio hasta MAX_TRANSCRIPT_PREVIEW_LENGTH caracteres
+            transcript_preview = transcript[:MAX_TRANSCRIPT_PREVIEW_LENGTH]
+            if len(transcript) > MAX_TRANSCRIPT_PREVIEW_LENGTH:
+                transcript_preview += "..."
+            display_summary = transcript_preview
+            logger.info(
+                "Using transcript for display_summary",
+                user_id=user_id,
+                recording_id=recording_id,
+                transcript_length=len(transcript),
+                agent_failed=agent_failed
+            )
+        elif agent_failed or is_error_summary:
+            # Si el agente falló y no hay transcripción, usar un mensaje más amigable
+            display_summary = "No se pudo procesar la grabación. La transcripción no está disponible."
+            logger.warning(
+                "Agent failed and no transcript available",
+                user_id=user_id,
+                recording_id=recording_id,
+                agent_failed=agent_failed,
+                is_error_summary=is_error_summary
+            )
+        else:
+            # Fallback: usar el summary del agente si no hay transcripción
+            display_summary = summary_text
         
         # Crear evento de grabación completada
         # El frontend espera un evento SSE con event="recording_complete" y data como JSON
@@ -533,7 +574,7 @@ async def notify_completion(
             recording_id=recording_id,
             session_id=session_id,
             title=title,
-            summary=result.get("summary", ""),
+            summary=display_summary,
             action_items=result.get("action_items", []),
             topics=result.get("topics", []),
         )
@@ -680,18 +721,36 @@ async def recording_complete(
         )
         
         # 5. Notificar vía SSE (mismo sistema que HITL)
+        # Usar user_ctx.sub en lugar de user_id del Form para que coincida con el SSE
         await notify_completion(
             session_id=session_id,
-            user_id=user_id,
+            user_id=user_ctx.sub,  # Usar el user_id del contexto autenticado, no del Form
             recording_id=recording_id,
             title=title,
-            result=result
+            result=result,
+            transcript=transcript
         )
+        
+        # Preparar respuesta: usar transcripción truncada en lugar del summary
+        # Misma lógica que en notify_completion para mantener consistencia
+        agent_failed = result.get("agent_failed", False)
+        summary_text = result.get("summary", "")
+        is_error_summary = "Error al procesar" in summary_text or "error" in summary_text.lower()
+        
+        if transcript and transcript.strip():
+            transcript_preview = transcript[:MAX_TRANSCRIPT_PREVIEW_LENGTH]
+            if len(transcript) > MAX_TRANSCRIPT_PREVIEW_LENGTH:
+                transcript_preview += "..."
+            display_summary = transcript_preview
+        elif agent_failed or is_error_summary:
+            display_summary = "No se pudo procesar la grabación. La transcripción no está disponible."
+        else:
+            display_summary = summary_text
         
         return {
             "status": "success",
             "recording_id": recording_id,
-            "summary": result.get("summary"),
+            "summary": display_summary,
             "action_items": result.get("action_items", []),
             "topics": result.get("topics", []),
         }
