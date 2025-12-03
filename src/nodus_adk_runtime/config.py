@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     port: int = 8080
     debug: bool = False
 
-    # Database
-    database_url: str = "postgresql+asyncpg://nodus:nodus_dev_password@postgres:5432/nodus"
+    # Database - reads from DATABASE_URL env var, with fallback
+    database_url: Optional[str] = None
 
     # Redis
     redis_url: str = "redis://redis:6379/0"
