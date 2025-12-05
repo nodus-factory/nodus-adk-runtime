@@ -51,6 +51,7 @@ class A2ATool(BaseTool):
         endpoint: str,
         timeout: float = 30.0,
         require_confirmation: Union[bool, Callable[..., bool]] = False,
+        is_hitl_tool: bool = False,
     ):
         """
         Initialize an A2A tool.
@@ -62,13 +63,16 @@ class A2ATool(BaseTool):
             endpoint: A2A agent endpoint URL
             timeout: Request timeout in seconds
             require_confirmation: Whether this tool requires HITL confirmation
+            is_hitl_tool: Whether this tool requires HITL (marks as long_running for ADK resumability)
         """
         tool_name = f"{agent_name}_{method}"
         description = method_info.get("description", f"Call {method} on {agent_name}")
         
+        # Mark as long_running if it's a HITL tool (for ADK resumability)
         super().__init__(
             name=tool_name,
             description=description,
+            is_long_running=is_hitl_tool,
         )
         
         self._agent_name = agent_name
@@ -77,6 +81,7 @@ class A2ATool(BaseTool):
         self._endpoint = endpoint
         self._timeout = timeout
         self._require_confirmation = require_confirmation
+        self._is_hitl_tool = is_hitl_tool
         
         logger.info(
             "A2ATool created",

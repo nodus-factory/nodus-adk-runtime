@@ -189,16 +189,21 @@ async def create_session(
         
         # Run agent with user message
         from google.adk.runners import Runner
+        from google.adk.apps.app import ResumabilityConfig
         from google.genai import types
         
         # 🔥 FIX: Use shared persistent session service to maintain conversation context
         session_service = get_session_service()
+        
+        # Enable ADK resumability for HITL support (allows pause/resume on long-running tools)
+        resumability_config = ResumabilityConfig(is_resumable=True)
         
         runner = Runner(
             app_name="personal_assistant",
             agent=agent,
             session_service=session_service,
             memory_service=memory_service,
+            resumability_config=resumability_config,
         )
         
         # 🔥 FIX: Try to get existing session first, create only if it doesn't exist
@@ -641,16 +646,21 @@ async def add_message(
         
         # Run agent with user message
         from google.adk.runners import Runner
+        from google.adk.apps.app import ResumabilityConfig
         from google.genai import types
         
         # 🔥 FIX: Use shared persistent session service
         session_service = get_session_service()
+        
+        # Enable ADK resumability for HITL support (allows pause/resume on long-running tools)
+        resumability_config = ResumabilityConfig(is_resumable=True)
         
         runner = Runner(
             app_name="personal_assistant",
             agent=agent,
             session_service=session_service,
             memory_service=memory_service,
+            resumability_config=resumability_config,
         )
         
         # 🔥 FIX: Get or create session using the session_id from path
