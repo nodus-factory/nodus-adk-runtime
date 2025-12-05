@@ -200,6 +200,13 @@ class A2AToolBuilder:
             capabilities = card.get("capabilities", {})
             
             for method, method_info in capabilities.items():
+                # Detect if this is a HITL tool (methods ending with _confirmation or containing _with_confirmation)
+                is_hitl_tool = (
+                    method.endswith("_confirmation") or 
+                    "_with_confirmation" in method or
+                    method.startswith("request_")  # Common HITL pattern
+                )
+                
                 # Create A2ATool instance (ADK-compliant BaseTool)
                 tool = A2ATool(
                     agent_name=agent_config.name,
@@ -207,6 +214,7 @@ class A2AToolBuilder:
                     method_info=method_info,
                     endpoint=agent_config.endpoint,
                     timeout=agent_config.timeout,
+                    is_hitl_tool=is_hitl_tool,
                 )
                 
                 self.tools.append(tool)
@@ -216,6 +224,8 @@ class A2AToolBuilder:
                     name=tool.name,
                     agent=agent_config.name,
                     method=method,
+                    is_hitl_tool=is_hitl_tool,
+                    is_long_running=tool.is_long_running,
                 )
         
         logger.info("A2A tools built (ADK-compliant)", count=len(self.tools))
