@@ -240,55 +240,126 @@ async def submit_hitl_decision(
                 "error": "Missing function_call_id or function_name in event metadata"
             }
         
-        # Prepare FunctionResponse based on decision (ADK requires FunctionResponse, not text message)
-        if decision.approved:
-            # User approved: provide FunctionResponse with approval result
-            # Extract user input from decision.reason (for tools that need user input like multiply_with_confirmation)
-            user_input = decision.reason or None
+        # Check if this is a generic HITL tool (request_user_input) using ADK ToolConfirmation
+        is_generic_hitl = metadata.get("tool") == "request_user_input"
+        
+        if is_generic_hitl:
+            # For generic HITL tools using ADK ToolConfirmation, we need to use ADK's standard format
+            from google.adk.tools.tool_confirmation import ToolConfirmation
+            from google.adk.flows.llm_flows.functions import REQUEST_CONFIRMATION_FUNCTION_CALL_NAME
             
-            # Try to parse user input as number if it's numeric (for math operations)
-            factor = None
-            if user_input:
-                try:
-                    factor = float(user_input.strip())
-                except (ValueError, AttributeError):
-                    pass  # Not a number, keep as string
+            # Extract user input from decision.reason
+            user_input = decision.reason if decision.approved else None
             
-            # Get action_data from event to preserve context (e.g., base_number for multiplication)
+            # Get payload structure from action_data
             action_data = event.action_data or {}
+            input_type = action_data.get("input_type", "text")
             
-            # Build response with user input and action context
-            response_data = {
-                "status": "approved",
-                "approved": True,
+            # Create ToolConfirmation payload
+            payload = {
+                "value": user_input,
+                "input_type": input_type,
+                "choices": action_data.get("choices"),
             }
             
-            # If user provided input (e.g., number for multiplication), include it
-            if user_input:
-                response_data["user_input"] = user_input
-                if factor is not None:
-                    response_data["factor"] = factor  # For math operations
+            # Create ToolConfirmation object
+            tool_confirmation = ToolConfirmation(
+                confirmed=decision.approved,
+                hint=event.action_description or "User input requested",
+                payload=payload if decision.approved else None
+            )
             
-            # Include action_data context (e.g., base_number) so agent can use it
-            if action_data:
-                response_data.update(action_data)
+            # For ADK ToolConfirmation, we need to find the REQUEST_CONFIRMATION function call ID
+            # ADK creates a special function call with name REQUEST_CONFIRMATION_FUNCTION_CALL_NAME
+            # that contains the original function call in its args
+            # We need to search the session events to find this function call
             
+            request_confirmation_call_id = None
+            try:
+                reloaded_session = await session_service.get_session(
+                    app_name="personal_assistant",
+                    user_id=user_ctx.sub,
+                    session_id=session_id,
+                )
+                if reloaded_session and reloaded_session.events:
+                    # Search backwards through events to find the REQUEST_CONFIRMATION function call
+                    for session_event in reversed(reloaded_session.events):
+                        if hasattr(session_event, 'content') and session_event.content:
+                            for part in session_event.content.parts:
+                                if hasattr(part, 'function_call') and part.function_call:
+                                    fc = part.function_call
+                                    if fc.name == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME:
+                                        # Check if this is for our original function call
+                                        if fc.args and 'originalFunctionCall' in fc.args:
+                                            original_fc = fc.args['originalFunctionCall']
+                                            if original_fc.get('id') == function_call_id:
+                                                request_confirmation_call_id = fc.id
+                                                break
+                        if request_confirmation_call_id:
+                            break
+            except Exception as e:
+                logger.warning("Could not find REQUEST_CONFIRMATION function call ID", error=str(e))
+            
+            # Use REQUEST_CONFIRMATION call ID if found, otherwise fall back to original
+            response_call_id = request_confirmation_call_id or function_call_id
+            
+            # Create FunctionResponse with ToolConfirmation
             function_response = types.FunctionResponse(
-                id=function_call_id,
-                name=function_name,
-                response=response_data
+                id=response_call_id,
+                name=REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,  # ADK's special function name
+                response=tool_confirmation.model_dump(by_alias=True, exclude_none=True)
             )
         else:
-            # User rejected: provide FunctionResponse with rejection result
-            function_response = types.FunctionResponse(
-                id=function_call_id,
-                name=function_name,
-                response={
-                    "status": "rejected",
-                    "approved": False,
-                    "reason": decision.reason or "User rejected"
+            # For A2A tools (legacy format)
+            # Prepare FunctionResponse based on decision (ADK requires FunctionResponse, not text message)
+            if decision.approved:
+                # User approved: provide FunctionResponse with approval result
+                # Extract user input from decision.reason (for A2A tools that need user input)
+                user_input = decision.reason or None
+                
+                # Try to parse user input as number if it's numeric (for math operations)
+                factor = None
+                if user_input:
+                    try:
+                        factor = float(user_input.strip())
+                    except (ValueError, AttributeError):
+                        pass  # Not a number, keep as string
+                
+                # Get action_data from event to preserve context (e.g., base_number for multiplication)
+                action_data = event.action_data or {}
+                
+                # Build response with user input and action context
+                response_data = {
+                    "status": "approved",
+                    "approved": True,
                 }
-            )
+                
+                # If user provided input (e.g., number for multiplication), include it
+                if user_input:
+                    response_data["user_input"] = user_input
+                    if factor is not None:
+                        response_data["factor"] = factor  # For math operations
+                
+                # Include action_data context (e.g., base_number) so agent can use it
+                if action_data:
+                    response_data.update(action_data)
+                
+                function_response = types.FunctionResponse(
+                    id=function_call_id,
+                    name=function_name,
+                    response=response_data
+                )
+            else:
+                # User rejected: provide FunctionResponse with rejection result
+                function_response = types.FunctionResponse(
+                    id=function_call_id,
+                    name=function_name,
+                    response={
+                        "status": "rejected",
+                        "approved": False,
+                        "reason": decision.reason or "User rejected"
+                    }
+                )
         
         # Create continuation message with FunctionResponse (ADK requirement)
         continuation_message = types.Content(
@@ -323,6 +394,29 @@ async def submit_hitl_decision(
             approved=decision.approved,
             reply_length=len(final_reply)
         )
+        
+        # 🔥 CRITICAL: Save session to memory after resuming (so Llibreta can retrieve the final_reply)
+        try:
+            # Reload session to get latest events (including the ones just generated from resume)
+            reloaded_session_after_resume = await session_service.get_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session_id,
+            )
+            
+            if reloaded_session_after_resume:
+                await memory_service.add_session_to_memory(reloaded_session_after_resume)
+                logger.info(
+                    "Session saved to memory after HITL resume",
+                    session_id=session_id,
+                    events_count=len(reloaded_session_after_resume.events) if reloaded_session_after_resume.events else 0
+                )
+        except Exception as memory_error:
+            logger.warning(
+                "Failed to save session to memory after HITL resume",
+                error=str(memory_error),
+                session_id=session_id
+            )
         
         # Cleanup: remove event from storage
         hitl_service.remove_event(event_id)

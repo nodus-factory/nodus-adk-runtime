@@ -40,9 +40,9 @@
       "name": "hitl_math_agent",
       "endpoint": "http://agent-pool:8000/hitl_math/a2a",
       "card_url": "http://agent-pool:8000/hitl_math/",
-      "enabled": true,
+      "enabled": false,
       "timeout": 30,
-      "description": "Interactive multiplication with HITL user input",
+      "description": "Interactive multiplication with HITL user input (DEPRECATED - use request_user_input instead)",
       "capabilities": ["multiply_with_confirmation", "execute_multiplication"]
     }
   ],

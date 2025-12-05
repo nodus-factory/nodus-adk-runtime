@@ -349,6 +349,74 @@ async def create_session(
         
         reply = " ".join(response_parts) if response_parts else "I received your message."
         
+        # 🔥 NEW: After loop ends, check session for ToolConfirmation requests
+        # (ADK may have paused the invocation, so we need to check session events)
+        try:
+            reloaded_session = await session_service.get_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session.id,
+            )
+            if reloaded_session and reloaded_session.events:
+                # Check last events for ToolConfirmation requests
+                for event in reversed(reloaded_session.events[-5:]):  # Check last 5 events
+                    if hasattr(event, 'actions') and event.actions:
+                        if hasattr(event.actions, 'requested_tool_confirmations'):
+                            confirmations = event.actions.requested_tool_confirmations
+                            if confirmations:
+                                logger.info(
+                                    "ADK ToolConfirmation detected in session events (after loop)",
+                                    count=len(confirmations),
+                                    function_call_ids=list(confirmations.keys())
+                                )
+                                # Process confirmations
+                                for function_call_id, tool_confirmation in confirmations.items():
+                                    # Handle both ToolConfirmation object and dict
+                                    if isinstance(tool_confirmation, dict):
+                                        hint = tool_confirmation.get("hint", "Confirmation required")
+                                        payload = tool_confirmation.get("payload") or {}
+                                    else:
+                                        # ToolConfirmation object
+                                        hint = getattr(tool_confirmation, 'hint', None) or "Confirmation required"
+                                        payload = getattr(tool_confirmation, 'payload', None) or {}
+                                    
+                                    # Find the function call in previous events
+                                    function_call_name = None
+                                    for prev_event in reloaded_session.events:
+                                        if hasattr(prev_event, 'content') and prev_event.content:
+                                            for part in prev_event.content.parts:
+                                                if hasattr(part, 'function_call') and part.function_call:
+                                                    if part.function_call.id == function_call_id:
+                                                        function_call_name = part.function_call.name
+                                                        break
+                                        if function_call_name:
+                                            break
+                                    
+                                    # Create HITL marker
+                                    hitl_marker = {
+                                        "_hitl_required": True,
+                                        "agent": "root_agent",
+                                        "method": function_call_name or "request_user_input",
+                                        "action_type": "request_user_input",
+                                        "action_description": hint,
+                                        "action_data": {
+                                            "question": hint,
+                                            "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
+                                            "default_value": payload.get("value") if isinstance(payload, dict) else None,
+                                            "choices": payload.get("choices") if isinstance(payload, dict) else None,
+                                        },
+                                        "metadata": {
+                                            "tool": "request_user_input",
+                                            "function_call_id": function_call_id,
+                                            "function_name": function_call_name or "request_user_input",
+                                        },
+                                        "question": hint,
+                                    }
+                                    tool_calls.append(hitl_marker)
+                                    break  # Process only first confirmation for now
+        except Exception as e:
+            logger.warning("Could not check session for ToolConfirmation", error=str(e))
+        
         # 🔥 NEW: Check if any tool returned HITL requirement
         hitl_required = False
         hitl_data = None
@@ -682,6 +750,61 @@ async def add_message(
                         except Exception as e:
                             logger.debug("Error parsing function_response", error=str(e))
             
+            # 🔥 NEW: Check for ADK ToolConfirmation requests
+            if hasattr(event, 'actions') and event.actions:
+                if hasattr(event.actions, 'requested_tool_confirmations'):
+                    confirmations = event.actions.requested_tool_confirmations
+                    if confirmations:
+                        logger.info(
+                            "ADK ToolConfirmation detected",
+                            count=len(confirmations),
+                            function_call_ids=list(confirmations.keys())
+                        )
+                        # Store confirmations for later processing
+                        for function_call_id, tool_confirmation in confirmations.items():
+                            # Handle both ToolConfirmation object and dict
+                            if isinstance(tool_confirmation, dict):
+                                hint = tool_confirmation.get("hint", "Confirmation required")
+                                payload = tool_confirmation.get("payload") or {}
+                            else:
+                                # ToolConfirmation object
+                                hint = getattr(tool_confirmation, 'hint', None) or "Confirmation required"
+                                payload = getattr(tool_confirmation, 'payload', None) or {}
+                            
+                            # Get function call info from event content
+                            function_call_name = None
+                            function_call_args = {}
+                            
+                            if hasattr(event, 'content') and event.content:
+                                for part in event.content.parts:
+                                    if hasattr(part, 'function_call') and part.function_call:
+                                        if part.function_call.id == function_call_id:
+                                            function_call_name = part.function_call.name
+                                            function_call_args = part.function_call.args or {}
+                                            break
+                            
+                            # Create HITL marker compatible with existing system
+                            hitl_marker = {
+                                "_hitl_required": True,
+                                "agent": "root_agent",  # Generic tool, not A2A
+                                "method": function_call_name or "request_user_input",
+                                "action_type": "request_user_input",
+                                "action_description": hint,
+                                "action_data": {
+                                    "question": hint,
+                                    "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
+                                    "default_value": payload.get("value") if isinstance(payload, dict) else None,
+                                    "choices": payload.get("choices") if isinstance(payload, dict) else None,
+                                },
+                                "metadata": {
+                                    "tool": "request_user_input",  # Per activar input field a AdkHitlCard
+                                    "function_call_id": function_call_id,  # Critical per FunctionResponse
+                                    "function_name": function_call_name or "request_user_input",
+                                },
+                                "question": hint,
+                            }
+                            tool_calls.append(hitl_marker)
+            
             # Extract tool calls and citations from custom_metadata
             if hasattr(event, 'custom_metadata') and event.custom_metadata:
                 metadata = event.custom_metadata
@@ -707,6 +830,74 @@ async def add_message(
                     structured_data.extend(metadata['structured_data'])
         
         reply = " ".join(response_parts) if response_parts else "I received your message."
+        
+        # 🔥 NEW: After loop ends, check session for ToolConfirmation requests
+        # (ADK may have paused the invocation, so we need to check session events)
+        try:
+            reloaded_session = await session_service.get_session(
+                app_name="personal_assistant",
+                user_id=user_ctx.sub,
+                session_id=session.id,
+            )
+            if reloaded_session and reloaded_session.events:
+                # Check last events for ToolConfirmation requests
+                for event in reversed(reloaded_session.events[-5:]):  # Check last 5 events
+                    if hasattr(event, 'actions') and event.actions:
+                        if hasattr(event.actions, 'requested_tool_confirmations'):
+                            confirmations = event.actions.requested_tool_confirmations
+                            if confirmations:
+                                logger.info(
+                                    "ADK ToolConfirmation detected in session events (after loop)",
+                                    count=len(confirmations),
+                                    function_call_ids=list(confirmations.keys())
+                                )
+                                # Process confirmations
+                                for function_call_id, tool_confirmation in confirmations.items():
+                                    # Handle both ToolConfirmation object and dict
+                                    if isinstance(tool_confirmation, dict):
+                                        hint = tool_confirmation.get("hint", "Confirmation required")
+                                        payload = tool_confirmation.get("payload") or {}
+                                    else:
+                                        # ToolConfirmation object
+                                        hint = getattr(tool_confirmation, 'hint', None) or "Confirmation required"
+                                        payload = getattr(tool_confirmation, 'payload', None) or {}
+                                    
+                                    # Find the function call in previous events
+                                    function_call_name = None
+                                    for prev_event in reloaded_session.events:
+                                        if hasattr(prev_event, 'content') and prev_event.content:
+                                            for part in prev_event.content.parts:
+                                                if hasattr(part, 'function_call') and part.function_call:
+                                                    if part.function_call.id == function_call_id:
+                                                        function_call_name = part.function_call.name
+                                                        break
+                                        if function_call_name:
+                                            break
+                                    
+                                    # Create HITL marker
+                                    hitl_marker = {
+                                        "_hitl_required": True,
+                                        "agent": "root_agent",
+                                        "method": function_call_name or "request_user_input",
+                                        "action_type": "request_user_input",
+                                        "action_description": hint,
+                                        "action_data": {
+                                            "question": hint,
+                                            "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
+                                            "default_value": payload.get("value") if isinstance(payload, dict) else None,
+                                            "choices": payload.get("choices") if isinstance(payload, dict) else None,
+                                        },
+                                        "metadata": {
+                                            "tool": "request_user_input",
+                                            "function_call_id": function_call_id,
+                                            "function_name": function_call_name or "request_user_input",
+                                        },
+                                        "question": hint,
+                                    }
+                                    tool_calls.append(hitl_marker)
+                                    break  # Process only first confirmation for now
+        except Exception as e:
+            logger.warning("Could not check session for ToolConfirmation", error=str(e))
         
         # 🔥 NEW: Check if any tool returned HITL requirement
         hitl_required = False
