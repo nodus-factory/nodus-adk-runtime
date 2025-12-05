@@ -108,6 +108,7 @@ async def hitl_events_stream(
                     yield {
                         "event": "ping",
                         "data": json.dumps({"type": "ping", "timestamp": asyncio.get_event_loop().time()})
+                    }
                     
         except asyncio.CancelledError:
             logger.info("HITL SSE client disconnected", user_id=user_id)
