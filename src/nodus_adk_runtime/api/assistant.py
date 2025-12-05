@@ -258,6 +258,8 @@ async def create_session(
         
         logger.info("🔄 Starting agent run_async", session_id=session.id, message=request.message[:50])
         event_count = 0
+        last_event = None
+        invocation_id = None  # Will be captured from events
         
         async for event in runner.run_async(
             user_id=user_ctx.sub,
@@ -265,6 +267,12 @@ async def create_session(
             new_message=user_content,
         ):
             event_count += 1
+            last_event = event  # Keep track of last event for invocation_id
+            
+            # Capture invocation_id from event (ADK sets this automatically)
+            if hasattr(event, 'invocation_id') and event.invocation_id:
+                invocation_id = event.invocation_id
+                logger.debug("Captured invocation_id from event", invocation_id=invocation_id)
             
             # 🔍 DEBUG: Log event details
             event_type = type(event).__name__
@@ -367,7 +375,8 @@ async def create_session(
             )
             # Use the message from the tool or generate a default one
             reply = hitl_data.get('message_to_user', reply)
-        # If HITL is required (for other tools), create confirmation request and wait for user decision
+        # If HITL is required (for other tools), create confirmation request WITHOUT blocking
+        # ADK will pause automatically because the tool is marked as long_running
         elif hitl_required and hitl_data:
             from nodus_adk_runtime.services.hitl_service import get_hitl_service
             import uuid as uuid_lib
@@ -375,14 +384,37 @@ async def create_session(
             hitl_service = get_hitl_service()
             event_id = f"hitl_{uuid_lib.uuid4().hex[:12]}"
             
+            # Get invocation_id from last event (ADK sets this when pausing)
+            # If not available from event, try to get from session
+            if not invocation_id and last_event and hasattr(last_event, 'invocation_id'):
+                invocation_id = last_event.invocation_id
+            
+            # If still not available, reload session to get latest invocation_id
+            if not invocation_id:
+                try:
+                    reloaded_session = await session_service.get_session(
+                        app_name="personal_assistant",
+                        user_id=user_ctx.sub,
+                        session_id=session.id,
+                    )
+                    if reloaded_session and reloaded_session.events:
+                        # Get invocation_id from last event in session
+                        last_session_event = reloaded_session.events[-1]
+                        if hasattr(last_session_event, 'invocation_id'):
+                            invocation_id = last_session_event.invocation_id
+                except Exception as e:
+                    logger.warning("Could not get invocation_id from session", error=str(e))
+            
             logger.info(
-                "Creating HITL confirmation request",
+                "Creating HITL event (non-blocking, ADK will pause automatically)",
                 event_id=event_id,
                 user_id=user_ctx.sub,
+                invocation_id=invocation_id,
                 action=hitl_data.get('action_description')
             )
             
-            # Request confirmation (this waits for user decision via SSE)
+            # Create HITL event WITHOUT waiting (non-blocking)
+            # ADK has already paused the invocation because the tool is long_running
             try:
                 # Merge original metadata from agent with session metadata
                 merged_metadata = {
@@ -390,156 +422,40 @@ async def create_session(
                     'method': hitl_data.get('method'),
                     'session_id': session.id,
                     'original_message': request.message,
+                    'invocation_id': invocation_id,  # ← Critical: Save for resuming
                 }
                 # Add agent's metadata (tool, input_type, etc.)
                 if hitl_data.get('metadata'):
                     merged_metadata.update(hitl_data.get('metadata'))
                 
-                decision = await hitl_service.request_confirmation(
+                # Create event WITHOUT waiting (non-blocking)
+                await hitl_service.create_event_async(
                     user_id=user_ctx.sub,
                     event_id=event_id,
                     action_description=hitl_data.get('action_description', 'Unknown action'),
                     action_data=hitl_data.get('action_data', {}),
                     metadata=merged_metadata,
-                    timeout=300.0  # 5 minutes
                 )
+                
+                # Return immediately with HITL pending status
+                # ADK has already paused the invocation
+                reply = hitl_data.get('message_to_user', reply)
                 
                 logger.info(
-                    "HITL decision received",
+                    "HITL event created, returning immediately (invocation paused by ADK)",
                     event_id=event_id,
-                    approved=decision.approved,
-                    reason=decision.reason
+                    invocation_id=invocation_id,
+                    session_id=session.id
                 )
                 
-                if decision.approved:
-                    # HYBRID APPROACH: Execute action directly + feed result to Root Agent
-                    # Step 1: Execute the HITL-approved action directly via A2A
-                    agent_name = hitl_data.get('agent')
-                    original_method = hitl_data.get('method')
-                    action_data = hitl_data.get('action_data', {})
-                    
-                    # Determine execution method name
-                    # Convention: {action}_with_confirmation → execute_{action}
-                    # Special cases for specific agents
-                    if agent_name == "hitl_math_agent" and original_method == "multiply_with_confirmation":
-                        execution_method = "execute_multiplication"
-                    else:
-                        # Generic fallback: remove _with_confirmation and add execute_ prefix
-                        execution_method = original_method.replace('_with_confirmation', '')
-                        if execution_method == original_method:
-                            execution_method = f"execute_{original_method}"
-                        else:
-                            execution_method = f"execute_{execution_method}"
-                    
-                    logger.info(
-                        "Executing HITL-approved action directly",
-                        agent=agent_name,
-                        original_method=original_method,
-                        execution_method=execution_method,
-                        params=action_data
-                    )
-                    
-                    try:
-                        # Get agent endpoint from A2A config
-                        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import get_agent_config
-                        agent_config = get_agent_config(agent_name)
-                        
-                        if not agent_config:
-                            raise ValueError(f"Agent {agent_name} not found in A2A config")
-                        
-                        endpoint = agent_config.endpoint
-                        
-                        # Call execution method directly via A2A
-                        from nodus_adk_agents.a2a_client import A2AClient
-                        client = A2AClient(endpoint, timeout=30.0)
-                        
-                        # Filter action_data to only include parameters accepted by the execution method
-                        # For hitl_math_agent: only base_number and factor
-                        if agent_name == "hitl_math_agent" and execution_method == "execute_multiplication":
-                            # If user provided input (number via reason), use it as factor
-                            factor = action_data.get("factor", 2.0)
-                            if decision.reason:
-                                try:
-                                    factor = float(decision.reason)
-                                    logger.info(
-                                        "Using user-provided factor from HITL input",
-                                        user_input=decision.reason,
-                                        parsed_factor=factor
-                                    )
-                                except (ValueError, TypeError):
-                                    logger.warning(
-                                        "Failed to parse user input as number, using default",
-                                        user_input=decision.reason,
-                                        default_factor=factor
-                                    )
-                            
-                            execution_params = {
-                                "base_number": action_data.get("base_number"),
-                                "factor": factor
-                            }
-                        else:
-                            # Generic fallback: pass all action_data
-                            execution_params = action_data
-                        
-                        execution_result = await client.call(execution_method, execution_params)
-                        
-                        logger.info(
-                            "HITL action executed successfully",
-                            agent=agent_name,
-                            method=execution_method,
-                            result=execution_result
-                        )
-                        
-                        # Step 2: Feed result back to Root Agent for final response
-                        result_value = execution_result.get('result', execution_result)
-                        result_explanation = execution_result.get('explanation', f"Result: {result_value}")
-                        
-                        continuation_message = types.Content(
-                            role="user",
-                            parts=[types.Part.from_text(
-                                text=(
-                                    f"The action has been completed successfully. "
-                                    f"The result is: {result_explanation}. "
-                                    f"Please provide a final response to the user with this result."
-                                )
-                            )],
-                        )
-                        
-                        # Clear previous response parts
-                        response_parts = []
-                        
-                        # Step 3: Continue Root Agent with the result
-                        logger.info("Continuing Root Agent with execution result", session_id=session.id)
-                        
-                        async for event in runner.run_async(
-                            user_id=user_ctx.sub,
-                            session_id=session.id,
-                            new_message=continuation_message,
-                        ):
-                            if hasattr(event, 'content') and event.content:
-                                for part in event.content.parts:
-                                    if hasattr(part, 'text') and part.text:
-                                        response_parts.append(part.text)
-                        
-                        # Step 4: Final reply with result
-                        reply = " ".join(response_parts) if response_parts else result_explanation
-                        logger.info("HITL flow completed successfully", event_id=event_id)
-                        
-                    except Exception as exec_error:
-                        logger.error(
-                            "HITL action execution failed",
-                            error=str(exec_error),
-                            agent=agent_name,
-                            method=execution_method
-                        )
-                        reply = f"Action could not be executed: {str(exec_error)}"
-                else:
-                    # User rejected
-                    reply = f"Action cancelled: {decision.reason or 'User declined the request.'}"
-                    logger.info("HITL action rejected by user", event_id=event_id, reason=decision.reason)
+                # Skip the rest of the HITL handling (execution will happen after user confirms)
+                # This will be handled in Phase 3 (resume after confirmation)
+                # For now, just return the intermediate reply
+                # NOTE: The old blocking code is removed for Phase 2
+                # Phase 3 will implement resume logic
             
             except Exception as hitl_error:
-                logger.error("HITL confirmation failed", error=str(hitl_error), event_id=event_id)
+                logger.error("HITL event creation failed", error=str(hitl_error), event_id=event_id)
                 reply = f"Action could not be completed: {str(hitl_error)}"
         
         # Save session to memory after processing
@@ -711,12 +627,21 @@ async def add_message(
         memories = []
         intent = None
         structured_data = []
+        last_event = None
+        invocation_id = None  # Will be captured from events
         
         async for event in runner.run_async(
             user_id=user_ctx.sub,
             session_id=session.id,
             new_message=user_content,
         ):
+            last_event = event  # Keep track of last event for invocation_id
+            
+            # Capture invocation_id from event (ADK sets this automatically)
+            if hasattr(event, 'invocation_id') and event.invocation_id:
+                invocation_id = event.invocation_id
+                logger.debug("Captured invocation_id from event", invocation_id=invocation_id)
+            
             # Extract text content
             if hasattr(event, 'content') and event.content:
                 for part in event.content.parts:
@@ -802,7 +727,8 @@ async def add_message(
             )
             # Use the message from the tool or generate a default one
             reply = hitl_data.get('message_to_user', reply)
-        # If HITL is required (for other tools), create confirmation request and wait for user decision
+        # If HITL is required (for other tools), create confirmation request WITHOUT blocking
+        # ADK will pause automatically because the tool is marked as long_running
         elif hitl_required and hitl_data:
             from nodus_adk_runtime.services.hitl_service import get_hitl_service
             import uuid as uuid_lib
@@ -810,14 +736,37 @@ async def add_message(
             hitl_service = get_hitl_service()
             event_id = f"hitl_{uuid_lib.uuid4().hex[:12]}"
             
+            # Get invocation_id from last event (ADK sets this when pausing)
+            # If not available from event, try to get from session
+            if not invocation_id and last_event and hasattr(last_event, 'invocation_id'):
+                invocation_id = last_event.invocation_id
+            
+            # If still not available, reload session to get latest invocation_id
+            if not invocation_id:
+                try:
+                    reloaded_session = await session_service.get_session(
+                        app_name="personal_assistant",
+                        user_id=user_ctx.sub,
+                        session_id=session.id,
+                    )
+                    if reloaded_session and reloaded_session.events:
+                        # Get invocation_id from last event in session
+                        last_session_event = reloaded_session.events[-1]
+                        if hasattr(last_session_event, 'invocation_id'):
+                            invocation_id = last_session_event.invocation_id
+                except Exception as e:
+                    logger.warning("Could not get invocation_id from session", error=str(e))
+            
             logger.info(
-                "Creating HITL confirmation request",
+                "Creating HITL event (non-blocking, ADK will pause automatically)",
                 event_id=event_id,
                 user_id=user_ctx.sub,
+                invocation_id=invocation_id,
                 action=hitl_data.get('action_description')
             )
             
-            # Request confirmation (this waits for user decision via SSE)
+            # Create HITL event WITHOUT waiting (non-blocking)
+            # ADK has already paused the invocation because the tool is long_running
             try:
                 # Merge original metadata from agent with session metadata
                 merged_metadata = {
@@ -825,156 +774,40 @@ async def add_message(
                     'method': hitl_data.get('method'),
                     'session_id': session.id,
                     'original_message': request.message,
+                    'invocation_id': invocation_id,  # ← Critical: Save for resuming
                 }
                 # Add agent's metadata (tool, input_type, etc.)
                 if hitl_data.get('metadata'):
                     merged_metadata.update(hitl_data.get('metadata'))
                 
-                decision = await hitl_service.request_confirmation(
+                # Create event WITHOUT waiting (non-blocking)
+                await hitl_service.create_event_async(
                     user_id=user_ctx.sub,
                     event_id=event_id,
                     action_description=hitl_data.get('action_description', 'Unknown action'),
                     action_data=hitl_data.get('action_data', {}),
                     metadata=merged_metadata,
-                    timeout=300.0  # 5 minutes
                 )
+                
+                # Return immediately with HITL pending status
+                # ADK has already paused the invocation
+                reply = hitl_data.get('message_to_user', reply)
                 
                 logger.info(
-                    "HITL decision received",
+                    "HITL event created, returning immediately (invocation paused by ADK)",
                     event_id=event_id,
-                    approved=decision.approved,
-                    reason=decision.reason
+                    invocation_id=invocation_id,
+                    session_id=session.id
                 )
                 
-                if decision.approved:
-                    # HYBRID APPROACH: Execute action directly + feed result to Root Agent
-                    # Step 1: Execute the HITL-approved action directly via A2A
-                    agent_name = hitl_data.get('agent')
-                    original_method = hitl_data.get('method')
-                    action_data = hitl_data.get('action_data', {})
-                    
-                    # Determine execution method name
-                    # Convention: {action}_with_confirmation → execute_{action}
-                    # Special cases for specific agents
-                    if agent_name == "hitl_math_agent" and original_method == "multiply_with_confirmation":
-                        execution_method = "execute_multiplication"
-                    else:
-                        # Generic fallback: remove _with_confirmation and add execute_ prefix
-                        execution_method = original_method.replace('_with_confirmation', '')
-                        if execution_method == original_method:
-                            execution_method = f"execute_{original_method}"
-                        else:
-                            execution_method = f"execute_{execution_method}"
-                    
-                    logger.info(
-                        "Executing HITL-approved action directly",
-                        agent=agent_name,
-                        original_method=original_method,
-                        execution_method=execution_method,
-                        params=action_data
-                    )
-                    
-                    try:
-                        # Get agent endpoint from A2A config
-                        from nodus_adk_runtime.tools.a2a_dynamic_tool_builder import get_agent_config
-                        agent_config = get_agent_config(agent_name)
-                        
-                        if not agent_config:
-                            raise ValueError(f"Agent {agent_name} not found in A2A config")
-                        
-                        endpoint = agent_config.endpoint
-                        
-                        # Call execution method directly via A2A
-                        from nodus_adk_agents.a2a_client import A2AClient
-                        client = A2AClient(endpoint, timeout=30.0)
-                        
-                        # Filter action_data to only include parameters accepted by the execution method
-                        # For hitl_math_agent: only base_number and factor
-                        if agent_name == "hitl_math_agent" and execution_method == "execute_multiplication":
-                            # If user provided input (number via reason), use it as factor
-                            factor = action_data.get("factor", 2.0)
-                            if decision.reason:
-                                try:
-                                    factor = float(decision.reason)
-                                    logger.info(
-                                        "Using user-provided factor from HITL input",
-                                        user_input=decision.reason,
-                                        parsed_factor=factor
-                                    )
-                                except (ValueError, TypeError):
-                                    logger.warning(
-                                        "Failed to parse user input as number, using default",
-                                        user_input=decision.reason,
-                                        default_factor=factor
-                                    )
-                            
-                            execution_params = {
-                                "base_number": action_data.get("base_number"),
-                                "factor": factor
-                            }
-                        else:
-                            # Generic fallback: pass all action_data
-                            execution_params = action_data
-                        
-                        execution_result = await client.call(execution_method, execution_params)
-                        
-                        logger.info(
-                            "HITL action executed successfully",
-                            agent=agent_name,
-                            method=execution_method,
-                            result=execution_result
-                        )
-                        
-                        # Step 2: Feed result back to Root Agent for final response
-                        result_value = execution_result.get('result', execution_result)
-                        result_explanation = execution_result.get('explanation', f"Result: {result_value}")
-                        
-                        continuation_message = types.Content(
-                            role="user",
-                            parts=[types.Part.from_text(
-                                text=(
-                                    f"The action has been completed successfully. "
-                                    f"The result is: {result_explanation}. "
-                                    f"Please provide a final response to the user with this result."
-                                )
-                            )],
-                        )
-                        
-                        # Clear previous response parts
-                        response_parts = []
-                        
-                        # Step 3: Continue Root Agent with the result
-                        logger.info("Continuing Root Agent with execution result", session_id=session.id)
-                        
-                        async for event in runner.run_async(
-                            user_id=user_ctx.sub,
-                            session_id=session.id,
-                            new_message=continuation_message,
-                        ):
-                            if hasattr(event, 'content') and event.content:
-                                for part in event.content.parts:
-                                    if hasattr(part, 'text') and part.text:
-                                        response_parts.append(part.text)
-                        
-                        # Step 4: Final reply with result
-                        reply = " ".join(response_parts) if response_parts else result_explanation
-                        logger.info("HITL flow completed successfully", event_id=event_id)
-                        
-                    except Exception as exec_error:
-                        logger.error(
-                            "HITL action execution failed",
-                            error=str(exec_error),
-                            agent=agent_name,
-                            method=execution_method
-                        )
-                        reply = f"Action could not be executed: {str(exec_error)}"
-                else:
-                    # User rejected
-                    reply = f"Action cancelled: {decision.reason or 'User declined the request.'}"
-                    logger.info("HITL action rejected by user", event_id=event_id, reason=decision.reason)
+                # Skip the rest of the HITL handling (execution will happen after user confirms)
+                # This will be handled in Phase 3 (resume after confirmation)
+                # For now, just return the intermediate reply
+                # NOTE: The old blocking code is removed for Phase 2
+                # Phase 3 will implement resume logic
             
             except Exception as hitl_error:
-                logger.error("HITL confirmation failed", error=str(hitl_error), event_id=event_id)
+                logger.error("HITL event creation failed", error=str(hitl_error), event_id=event_id)
                 reply = f"Action could not be completed: {str(hitl_error)}"
         
         # Save session to memory after processing

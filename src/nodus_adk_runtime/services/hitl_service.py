@@ -115,6 +115,62 @@ class HITLService:
             if event_id in self.pending_decisions:
                 del self.pending_decisions[event_id]
     
+    async def create_event_async(
+        self,
+        user_id: str,
+        event_id: str,
+        action_description: str,
+        action_data: dict,
+        metadata: Optional[dict] = None,
+    ) -> str:
+        """
+        Create HITL event without waiting for decision (non-blocking)
+        
+        This method is used when ADK resumability is enabled. The invocation
+        will be paused automatically by ADK, and we can return the HTTP response
+        immediately. The user will respond later, and we'll resume the invocation.
+        
+        Args:
+            user_id: User ID to request confirmation from
+            event_id: Unique event ID
+            action_description: Human-readable description of the action
+            action_data: Action parameters
+            metadata: Optional metadata (should include invocation_id for resuming)
+            
+        Returns:
+            event_id (for reference)
+        """
+        from nodus_adk_runtime.api.hitl import get_user_queue
+        
+        logger.info(
+            "Creating HITL event (non-blocking)",
+            user_id=user_id,
+            event_id=event_id,
+            action=action_description
+        )
+        
+        # Create event
+        event = HITLEvent(
+            event_id=event_id,
+            event_type="confirmation_required",
+            action_description=action_description,
+            action_data=action_data,
+            metadata=metadata
+        )
+        
+        # Send event to user via SSE (NO crear Future, NO esperar)
+        queue = get_user_queue(user_id)
+        await queue.put(event)
+        
+        logger.info(
+            "HITL event created and queued for SSE (non-blocking)",
+            event_id=event_id,
+            user_id=user_id,
+            invocation_id=metadata.get('invocation_id') if metadata else None
+        )
+        
+        return event_id
+    
     async def store_decision(
         self,
         event_id: str,
