@@ -283,3 +283,4 @@ class QueryPagesTool(BaseTool):
                 "message": f"Search failed: {str(e)}",
             }
 
+

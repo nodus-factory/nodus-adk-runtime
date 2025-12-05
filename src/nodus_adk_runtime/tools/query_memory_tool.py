@@ -277,3 +277,4 @@ class QueryMemoryTool(BaseTool):
                 "message": f"Search failed: {str(e)}",
             }
 
+

@@ -81,17 +81,17 @@ class QueryKnowledgeBaseTool(BaseTool):
 
     def _get_collection_name(self, is_general: bool = False) -> str:
         """Generate collection name with tenant awareness."""
-        # Backoffice uses: knowledge_t_<tenant_name>_<user_id>
+        # Backoffice uses: knowledge_<tenant_name>_<user_id> (NO "t_" prefix)
         # tenant_id is already in format "t_default" or just "default"
         # Remove "t_" prefix if present to avoid duplication
         tenant_name = self.tenant_id.replace("t_", "") if self.tenant_id.startswith("t_") else self.tenant_id
         
         if is_general:
-            # General tenant collection: knowledge_t_default_0
-            return f"knowledge_t_{tenant_name}_0"
+            # General tenant collection: knowledge_default_0
+            return f"knowledge_{tenant_name}_0"
         else:
-            # User-specific collection: knowledge_t_default_<user_id>
-            return f"knowledge_t_{tenant_name}_{self.user_id}"
+            # User-specific collection: knowledge_default_<user_id>
+            return f"knowledge_{tenant_name}_{self.user_id}"
 
     async def _get_embedding(self, text: str) -> list[float]:
         """Generate embedding using OpenAI (same as Backoffice)."""
