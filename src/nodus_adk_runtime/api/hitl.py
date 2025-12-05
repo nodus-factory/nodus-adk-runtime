@@ -199,7 +199,7 @@ async def submit_hitl_decision(
     # Build agent and resume invocation
     from nodus_adk_runtime.api.assistant import _build_agent_for_user, get_session_service
     from google.adk.runners import Runner
-    from google.adk.apps.app import ResumabilityConfig
+    from google.adk.apps.app import App, ResumabilityConfig
     from google.genai import types
     
     try:
@@ -210,12 +210,17 @@ async def submit_hitl_decision(
         session_service = get_session_service()
         resumability_config = ResumabilityConfig(is_resumable=True)
         
+        # Create App instance with resumability config (required for Runner)
+        app = App(
+            name="personal_assistant",
+            root_agent=agent,
+            resumability_config=resumability_config,
+        )
+        
         runner = Runner(
-            app_name="personal_assistant",
-            agent=agent,
+            app=app,
             session_service=session_service,
             memory_service=memory_service,
-            resumability_config=resumability_config,
         )
         
         # Prepare continuation message based on decision

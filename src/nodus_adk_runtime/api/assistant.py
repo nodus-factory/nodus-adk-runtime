@@ -189,7 +189,7 @@ async def create_session(
         
         # Run agent with user message
         from google.adk.runners import Runner
-        from google.adk.apps.app import ResumabilityConfig
+        from google.adk.apps.app import App, ResumabilityConfig
         from google.genai import types
         
         # 🔥 FIX: Use shared persistent session service to maintain conversation context
@@ -198,12 +198,17 @@ async def create_session(
         # Enable ADK resumability for HITL support (allows pause/resume on long-running tools)
         resumability_config = ResumabilityConfig(is_resumable=True)
         
+        # Create App instance with resumability config (required for Runner)
+        app = App(
+            name="personal_assistant",
+            root_agent=agent,
+            resumability_config=resumability_config,
+        )
+        
         runner = Runner(
-            app_name="personal_assistant",
-            agent=agent,
+            app=app,
             session_service=session_service,
             memory_service=memory_service,
-            resumability_config=resumability_config,
         )
         
         # 🔥 FIX: Try to get existing session first, create only if it doesn't exist
@@ -562,7 +567,7 @@ async def add_message(
         
         # Run agent with user message
         from google.adk.runners import Runner
-        from google.adk.apps.app import ResumabilityConfig
+        from google.adk.apps.app import App, ResumabilityConfig
         from google.genai import types
         
         # 🔥 FIX: Use shared persistent session service
@@ -571,12 +576,17 @@ async def add_message(
         # Enable ADK resumability for HITL support (allows pause/resume on long-running tools)
         resumability_config = ResumabilityConfig(is_resumable=True)
         
+        # Create App instance with resumability config (required for Runner)
+        app = App(
+            name="personal_assistant",
+            root_agent=agent,
+            resumability_config=resumability_config,
+        )
+        
         runner = Runner(
-            app_name="personal_assistant",
-            agent=agent,
+            app=app,
             session_service=session_service,
             memory_service=memory_service,
-            resumability_config=resumability_config,
         )
         
         # 🔥 FIX: Get or create session using the session_id from path
