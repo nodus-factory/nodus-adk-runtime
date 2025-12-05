@@ -59,6 +59,7 @@ async def hitl_events_stream(
         yield {
             "event": "connected",
             "data": json.dumps({"status": "connected", "user_id": user_id})
+        }
         
         try:
             while True:
