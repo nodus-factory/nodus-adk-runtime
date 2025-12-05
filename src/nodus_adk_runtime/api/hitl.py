@@ -223,24 +223,53 @@ async def submit_hitl_decision(
             memory_service=memory_service,
         )
         
-        # Prepare continuation message based on decision
+        # 🔥 CRITICAL: Get function_call_id and function_name from metadata
+        function_call_id = metadata.get('function_call_id')
+        function_name = metadata.get('function_name')
+        
+        if not function_call_id or not function_name:
+            logger.error(
+                "Missing function_call_id or function_name for resuming",
+                event_id=event_id,
+                function_call_id=function_call_id,
+                function_name=function_name,
+                metadata_keys=list(metadata.keys())
+            )
+            return {
+                "status": "error",
+                "error": "Missing function_call_id or function_name in event metadata"
+            }
+        
+        # Prepare FunctionResponse based on decision (ADK requires FunctionResponse, not text message)
         if decision.approved:
-            # User approved: continue with action execution
-            # The tool will execute automatically when resumed
-            continuation_message = types.Content(
-                role="user",
-                parts=[types.Part.from_text(
-                    text=f"User approved the action. Please proceed with execution."
-                )],
+            # User approved: provide FunctionResponse with approval result
+            # The tool will execute automatically when resumed with this response
+            function_response = types.FunctionResponse(
+                id=function_call_id,
+                name=function_name,
+                response={
+                    "status": "approved",
+                    "approved": True,
+                    "reason": decision.reason or "User approved"
+                }
             )
         else:
-            # User rejected: cancel action
-            continuation_message = types.Content(
-                role="user",
-                parts=[types.Part.from_text(
-                    text=f"User rejected the action: {decision.reason or 'No reason provided'}. Please inform the user that the action was cancelled."
-                )],
+            # User rejected: provide FunctionResponse with rejection result
+            function_response = types.FunctionResponse(
+                id=function_call_id,
+                name=function_name,
+                response={
+                    "status": "rejected",
+                    "approved": False,
+                    "reason": decision.reason or "User rejected"
+                }
             )
+        
+        # Create continuation message with FunctionResponse (ADK requirement)
+        continuation_message = types.Content(
+            role="user",
+            parts=[types.Part(function_response=function_response)],
+        )
         
         # Resume the paused invocation
         logger.info("Resuming invocation", invocation_id=invocation_id, session_id=session_id)

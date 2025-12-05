@@ -306,11 +306,19 @@ async def create_session(
                         try:
                             response_data = part.function_response.response
                             if isinstance(response_data, dict) and response_data.get('_hitl_required'):
+                                # 🔥 CRITICAL: Capture function_call_id for resumability
+                                function_call_id = part.function_response.id
+                                function_name = part.function_response.name
                                 logger.info(
                                     "HITL marker detected in function response",
                                     agent=response_data.get('agent'),
-                                    action=response_data.get('action_description')
+                                    action=response_data.get('action_description'),
+                                    function_call_id=function_call_id,
+                                    function_name=function_name
                                 )
+                                # Store function_call_id in response_data for later use
+                                response_data['_function_call_id'] = function_call_id
+                                response_data['_function_name'] = function_name
                                 tool_calls.append(response_data)
                         except Exception as e:
                             logger.debug("Error parsing function_response", error=str(e))
@@ -428,6 +436,8 @@ async def create_session(
                     'session_id': session.id,
                     'original_message': request.message,
                     'invocation_id': invocation_id,  # ← Critical: Save for resuming
+                    'function_call_id': hitl_data.get('_function_call_id'),  # ← Critical: Save for FunctionResponse
+                    'function_name': hitl_data.get('_function_name'),  # ← Critical: Save for FunctionResponse
                 }
                 # Add agent's metadata (tool, input_type, etc.)
                 if hitl_data.get('metadata'):
@@ -785,6 +795,8 @@ async def add_message(
                     'session_id': session.id,
                     'original_message': request.message,
                     'invocation_id': invocation_id,  # ← Critical: Save for resuming
+                    'function_call_id': hitl_data.get('_function_call_id'),  # ← Critical: Save for FunctionResponse
+                    'function_name': hitl_data.get('_function_name'),  # ← Critical: Save for FunctionResponse
                 }
                 # Add agent's metadata (tool, input_type, etc.)
                 if hitl_data.get('metadata'):
