@@ -243,15 +243,40 @@ async def submit_hitl_decision(
         # Prepare FunctionResponse based on decision (ADK requires FunctionResponse, not text message)
         if decision.approved:
             # User approved: provide FunctionResponse with approval result
-            # The tool will execute automatically when resumed with this response
+            # Extract user input from decision.reason (for tools that need user input like multiply_with_confirmation)
+            user_input = decision.reason or None
+            
+            # Try to parse user input as number if it's numeric (for math operations)
+            factor = None
+            if user_input:
+                try:
+                    factor = float(user_input.strip())
+                except (ValueError, AttributeError):
+                    pass  # Not a number, keep as string
+            
+            # Get action_data from event to preserve context (e.g., base_number for multiplication)
+            action_data = event.action_data or {}
+            
+            # Build response with user input and action context
+            response_data = {
+                "status": "approved",
+                "approved": True,
+            }
+            
+            # If user provided input (e.g., number for multiplication), include it
+            if user_input:
+                response_data["user_input"] = user_input
+                if factor is not None:
+                    response_data["factor"] = factor  # For math operations
+            
+            # Include action_data context (e.g., base_number) so agent can use it
+            if action_data:
+                response_data.update(action_data)
+            
             function_response = types.FunctionResponse(
                 id=function_call_id,
                 name=function_name,
-                response={
-                    "status": "approved",
-                    "approved": True,
-                    "reason": decision.reason or "User approved"
-                }
+                response=response_data
             )
         else:
             # User rejected: provide FunctionResponse with rejection result
