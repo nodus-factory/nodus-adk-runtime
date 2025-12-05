@@ -59,7 +59,6 @@ async def hitl_events_stream(
         yield {
             "event": "connected",
             "data": json.dumps({"status": "connected", "user_id": user_id})
-        }
         
         try:
             while True:
@@ -108,7 +107,6 @@ async def hitl_events_stream(
                     yield {
                         "event": "ping",
                         "data": json.dumps({"type": "ping", "timestamp": asyncio.get_event_loop().time()})
-                    }
                     
         except asyncio.CancelledError:
             logger.info("HITL SSE client disconnected", user_id=user_id)
@@ -127,14 +125,14 @@ async def submit_hitl_decision(
     user_ctx: UserContext = Depends(get_current_user)
 ):
     """
-    Submit user decision for a HITL confirmation
+    Submit user decision for a HITL confirmation and resume the paused invocation
     
     Args:
         event_id: Event ID from the confirmation_required event
         decision: User's decision (approved: true/false, reason: optional)
         
     Returns:
-        Confirmation of decision acceptance
+        Confirmation of decision acceptance and resume status
     """
     logger.info(
         "HITL decision received",
@@ -143,16 +141,158 @@ async def submit_hitl_decision(
         user_id=user_ctx.sub
     )
     
-    # Store decision (resolves waiting future in HITLService)
     hitl_service = get_hitl_service()
-    await hitl_service.store_decision(event_id, decision, user_ctx.sub)
     
-    return {
-        "status": "accepted",
-        "event_id": event_id,
-        "decision": decision.approved,
-        "timestamp": asyncio.get_event_loop().time()
-    }
+    # Get stored event to retrieve metadata (including invocation_id)
+    event = hitl_service.get_event(event_id)
+    
+    if not event:
+        logger.warning(
+            "HITL event not found for resumability",
+            event_id=event_id,
+            user_id=user_ctx.sub
+        )
+        # Fallback: try to resolve future if exists (legacy blocking mode)
+        await hitl_service.store_decision(event_id, decision, user_ctx.sub)
+        return {
+            "status": "accepted",
+            "event_id": event_id,
+            "decision": decision.approved,
+            "resumed": False,
+            "timestamp": asyncio.get_event_loop().time()
+        }
+    
+    # Extract metadata for resuming
+    metadata = event.metadata or {}
+    invocation_id = metadata.get('invocation_id')
+    session_id = metadata.get('session_id')
+    agent_name = metadata.get('agent')
+    method = metadata.get('method')
+    action_data = event.action_data
+    
+    logger.info(
+        "Resuming paused invocation after HITL decision",
+        event_id=event_id,
+        invocation_id=invocation_id,
+        session_id=session_id,
+        approved=decision.approved,
+        agent=agent_name,
+        method=method
+    )
+    
+    # Resume the paused invocation
+    
+    if not invocation_id or not session_id:
+        logger.error(
+            "Missing invocation_id or session_id for resuming",
+            event_id=event_id,
+            invocation_id=invocation_id,
+            session_id=session_id
+        )
+        return {
+            "status": "error",
+            "error": "Missing invocation_id or session_id"
+        }
+    
+    # Build agent and resume invocation
+    from nodus_adk_runtime.api.assistant import _build_agent_for_user, get_session_service
+    from google.adk.runners import Runner
+    from google.adk.apps.app import ResumabilityConfig
+    from google.genai import types
+    
+    try:
+        # Build agent for user
+        agent, memory_service = await _build_agent_for_user(user_ctx)
+        
+        # Create runner with resumability enabled
+        session_service = get_session_service()
+        resumability_config = ResumabilityConfig(is_resumable=True)
+        
+        runner = Runner(
+            app_name="personal_assistant",
+            agent=agent,
+            session_service=session_service,
+            memory_service=memory_service,
+            resumability_config=resumability_config,
+        )
+        
+        # Prepare continuation message based on decision
+        if decision.approved:
+            # User approved: continue with action execution
+            # The tool will execute automatically when resumed
+            continuation_message = types.Content(
+                role="user",
+                parts=[types.Part.from_text(
+                    text=f"User approved the action. Please proceed with execution."
+                )],
+            )
+        else:
+            # User rejected: cancel action
+            continuation_message = types.Content(
+                role="user",
+                parts=[types.Part.from_text(
+                    text=f"User rejected the action: {decision.reason or 'No reason provided'}. Please inform the user that the action was cancelled."
+                )],
+            )
+        
+        # Resume the paused invocation
+        logger.info("Resuming invocation", invocation_id=invocation_id, session_id=session_id)
+        
+        response_parts = []
+        async for resume_event in runner.run_async(
+            user_id=user_ctx.sub,
+            session_id=session_id,
+            invocation_id=invocation_id,
+            new_message=continuation_message,
+        ):
+            if hasattr(resume_event, 'content') and resume_event.content:
+                for part in resume_event.content.parts:
+                    if hasattr(part, 'text') and part.text:
+                        response_parts.append(part.text)
+        
+        final_reply = " ".join(response_parts) if response_parts else (
+            "Action approved and executed successfully." if decision.approved 
+            else f"Action cancelled: {decision.reason or 'User declined'}"
+        )
+        
+        logger.info(
+            "Invocation resumed successfully",
+            event_id=event_id,
+            invocation_id=invocation_id,
+            approved=decision.approved,
+            reply_length=len(final_reply)
+        )
+        
+        # Cleanup: remove event from storage
+        hitl_service.remove_event(event_id)
+        
+        return {
+            "status": "accepted_and_resumed",
+            "event_id": event_id,
+            "decision": decision.approved,
+            "invocation_id": invocation_id,
+            "final_reply": final_reply,
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+    except Exception as resume_error:
+        logger.error(
+            "Failed to resume invocation after HITL decision",
+            error=str(resume_error),
+            event_id=event_id,
+            invocation_id=invocation_id,
+            session_id=session_id
+        )
+        # Still store decision for legacy mode
+        await hitl_service.store_decision(event_id, decision, user_ctx.sub)
+        
+        return {
+            "status": "accepted_but_resume_failed",
+            "event_id": event_id,
+            "decision": decision.approved,
+            "error": str(resume_error),
+            "timestamp": asyncio.get_event_loop().time()
+        }
 
 
 @router.get("/health")

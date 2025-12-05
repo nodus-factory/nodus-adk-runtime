@@ -33,6 +33,8 @@ class HITLService:
     def __init__(self):
         # In-memory storage (use Redis in production)
         self.pending_decisions: Dict[str, asyncio.Future] = {}
+        # Store events for resumability (key: event_id, value: HITLEvent)
+        self.pending_events: Dict[str, HITLEvent] = {}
         self._instance_id = id(self)
         logger.info("HITLService initialized", instance_id=self._instance_id)
     
@@ -158,6 +160,9 @@ class HITLService:
             metadata=metadata
         )
         
+        # Store event for later retrieval (for resumability)
+        self.pending_events[event_id] = event
+        
         # Send event to user via SSE (NO crear Future, NO esperar)
         queue = get_user_queue(user_id)
         await queue.put(event)
@@ -205,6 +210,29 @@ class HITLService:
                 event_id=event_id,
                 available_events=list(self.pending_decisions.keys())
             )
+    
+    def get_event(self, event_id: str) -> Optional[HITLEvent]:
+        """
+        Get stored HITL event by event_id
+        
+        Args:
+            event_id: Event ID
+            
+        Returns:
+            HITLEvent if found, None otherwise
+        """
+        return self.pending_events.get(event_id)
+    
+    def remove_event(self, event_id: str):
+        """
+        Remove stored HITL event (cleanup after processing)
+        
+        Args:
+            event_id: Event ID
+        """
+        if event_id in self.pending_events:
+            del self.pending_events[event_id]
+            logger.debug("Removed HITL event from storage", event_id=event_id)
 
 
 # Singleton instance
