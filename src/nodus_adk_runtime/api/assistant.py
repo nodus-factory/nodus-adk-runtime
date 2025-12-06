@@ -136,6 +136,7 @@ async def _build_agent_for_user(user_ctx: UserContext) -> tuple[Any, Any]:
             "runtime_url": settings.runtime_url or "http://localhost:8080",
             "recorder_url": settings.recorder_url or "http://localhost:5005",
         },
+        memory_tool=memory_tool,  # CAPA 2: Semantic memory from Qdrant
         knowledge_tool=knowledge_tool,  # CAPA 3: Knowledge base (Qdrant)
         pages_tool=pages_tool,  # CAPA 4: Page documents (Qdrant)
         a2a_tools=a2a_tools,  # A2A tools
