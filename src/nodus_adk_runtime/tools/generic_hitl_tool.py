@@ -8,6 +8,8 @@ using ADK's built-in ToolConfirmation mechanism.
 from typing import Optional, Dict, Any, List
 from google.adk.tools.function_tool import FunctionTool
 from google.adk.tools.tool_context import ToolContext
+from google.genai import types
+from google.adk.tools.base_tool import override
 import structlog
 
 logger = structlog.get_logger()
@@ -108,13 +110,63 @@ def request_user_input(
     }
 
 
-# Crear FunctionTool
-# Note: No marquem require_confirmation=True perquè ho fem manualment amb request_confirmation()
-request_user_input_tool = FunctionTool(
-    request_user_input,
-    require_confirmation=False  # Ho fem manualment dins de la funció
-)
+class RequestUserInputTool(FunctionTool):
+    """
+    Custom FunctionTool with explicit schema definition for Groq compatibility.
+    
+    This ensures that the 'question' parameter is clearly marked as required
+    in the JSON schema, preventing validation errors with Groq and other LLMs.
+    
+    Follows the same pattern as QueryMemoryTool and A2ATool.
+    """
+    
+    def __init__(self):
+        super().__init__(
+            request_user_input,
+            require_confirmation=False  # Ho fem manualment dins de la funció
+        )
+        # Marcar com long_running per activar pausa automàtica quan es demana confirmació
+        self.is_long_running = True
+    
+    @override
+    def _get_declaration(self) -> types.FunctionDeclaration:
+        """
+        Define explicit JSON schema for request_user_input tool.
+        
+        This ensures Groq and other LLMs understand that 'question' is required.
+        Uses parameters_json_schema following the same pattern as QueryMemoryTool and A2ATool.
+        """
+        return types.FunctionDeclaration(
+            name=self.name,
+            description=self.description,
+            parameters_json_schema={
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The question or prompt to show to the user. This is REQUIRED and must be provided.",
+                    },
+                    "input_type": {
+                        "type": "string",
+                        "enum": ["text", "number", "choice"],
+                        "description": "Type of input expected: 'text' for text input, 'number' for numeric input, 'choice' for selecting from choices. Default: 'text'",
+                        "default": "text",
+                    },
+                    "default_value": {
+                        "type": ["string", "number", "null"],
+                        "description": "Optional default value to pre-fill in the input field",
+                    },
+                    "choices": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string"},
+                        "description": "List of choices (required if input_type='choice')",
+                    },
+                },
+                "required": ["question"],  # Explicitly mark question as required
+            },
+        )
 
-# Marcar com long_running per activar pausa automàtica quan es demana confirmació
-request_user_input_tool.is_long_running = True
+
+# Crear tool instance
+request_user_input_tool = RequestUserInputTool()
 
