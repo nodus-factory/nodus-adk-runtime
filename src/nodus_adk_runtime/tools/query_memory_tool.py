@@ -13,7 +13,7 @@ from typing_extensions import override
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, Range, MatchValue
 from openai import AsyncOpenAI
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from nodus_adk_runtime.config import settings
 
 logger = structlog.get_logger()
@@ -114,7 +114,9 @@ class QueryMemoryTool(BaseTool):
         if not time_range:
             return None
         
-        now = datetime.now()
+        # Use UTC for consistency with how memories are stored (event.timestamp is UTC)
+        # This matches get_current_datetime_tool which also uses UTC
+        now = datetime.now(timezone.utc)
         time_deltas = {
             'last_day': timedelta(days=1),
             'last_week': timedelta(days=7),
@@ -142,27 +144,29 @@ class QueryMemoryTool(BaseTool):
     @override
     def _get_declaration(self) -> types.FunctionDeclaration:
         """Define the tool's function signature for the LLM."""
+        # Use parameters_json_schema to allow nullable time_range for Groq compatibility
+        # This follows the same pattern as A2ATool and McpTool
         return types.FunctionDeclaration(
             name=self.name,
             description=self.description,
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "query": types.Schema(
-                        type=types.Type.STRING,
-                        description="The search query to find relevant memories",
-                    ),
-                    "limit": types.Schema(
-                        type=types.Type.INTEGER,
-                        description="Maximum number of results to return (default: 5)",
-                    ),
-                    "time_range": types.Schema(
-                        type=types.Type.STRING,
-                        description="Optional time filter: 'last_day', 'last_week', 'last_month'",
-                    ),
+            parameters_json_schema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to find relevant memories",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 5)",
+                    },
+                    "time_range": {
+                        "type": ["string", "null"],  # Allows string or null for Groq
+                        "description": "Optional time filter: 'last_day', 'last_week', 'last_month'. Omit or set to null for no time filter.",
+                    },
                 },
-                required=["query"],
-            ),
+                "required": ["query"],
+            },
         )
 
     @override
