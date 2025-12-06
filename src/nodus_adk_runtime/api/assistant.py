@@ -393,26 +393,52 @@ async def create_session(
                                         if function_call_name:
                                             break
                                     
+                                    # Detect if this is a recorder tool
+                                    is_recorder = function_call_name == "open_recorder"
+                                    
                                     # Create HITL marker
-                                    hitl_marker = {
-                                        "_hitl_required": True,
-                                        "agent": "root_agent",
-                                        "method": function_call_name or "request_user_input",
-                                        "action_type": "request_user_input",
-                                        "action_description": hint,
-                                        "action_data": {
+                                    if is_recorder:
+                                        # Recorder tool: include recorder-specific data
+                                        hitl_marker = {
+                                            "_hitl_required": True,
+                                            "agent": "root_agent",
+                                            "method": "open_recorder",
+                                            "action_type": "open_recorder",
+                                            "action_description": hint,
+                                            "action_data": {
+                                                "recorder_url": payload.get("recorder_url") if isinstance(payload, dict) else None,
+                                                "recording_id": payload.get("recording_id") if isinstance(payload, dict) else None,
+                                                "recording_type": payload.get("recording_type") if isinstance(payload, dict) else "audio",
+                                                "title": payload.get("title") if isinstance(payload, dict) else None,
+                                                "duration_minutes": payload.get("duration_minutes") if isinstance(payload, dict) else 60,
+                                            },
+                                            "metadata": {
+                                                "tool": "open_recorder",
+                                                "function_call_id": function_call_id,
+                                                "function_name": "open_recorder",
+                                            },
+                                        }
+                                    else:
+                                        # Generic user input tool
+                                        hitl_marker = {
+                                            "_hitl_required": True,
+                                            "agent": "root_agent",
+                                            "method": function_call_name or "request_user_input",
+                                            "action_type": "request_user_input",
+                                            "action_description": hint,
+                                            "action_data": {
+                                                "question": hint,
+                                                "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
+                                                "default_value": payload.get("value") if isinstance(payload, dict) else None,
+                                                "choices": payload.get("choices") if isinstance(payload, dict) else None,
+                                            },
+                                            "metadata": {
+                                                "tool": "request_user_input",
+                                                "function_call_id": function_call_id,
+                                                "function_name": function_call_name or "request_user_input",
+                                            },
                                             "question": hint,
-                                            "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
-                                            "default_value": payload.get("value") if isinstance(payload, dict) else None,
-                                            "choices": payload.get("choices") if isinstance(payload, dict) else None,
-                                        },
-                                        "metadata": {
-                                            "tool": "request_user_input",
-                                            "function_call_id": function_call_id,
-                                            "function_name": function_call_name or "request_user_input",
-                                        },
-                                        "question": hint,
-                                    }
+                                        }
                                     tool_calls.append(hitl_marker)
                                     break  # Process only first confirmation for now
         except Exception as e:
@@ -784,26 +810,52 @@ async def add_message(
                                             function_call_args = part.function_call.args or {}
                                             break
                             
+                            # Detect if this is a recorder tool
+                            is_recorder = function_call_name == "open_recorder"
+                            
                             # Create HITL marker compatible with existing system
-                            hitl_marker = {
-                                "_hitl_required": True,
-                                "agent": "root_agent",  # Generic tool, not A2A
-                                "method": function_call_name or "request_user_input",
-                                "action_type": "request_user_input",
-                                "action_description": hint,
-                                "action_data": {
+                            if is_recorder:
+                                # Recorder tool: include recorder-specific data
+                                hitl_marker = {
+                                    "_hitl_required": True,
+                                    "agent": "root_agent",
+                                    "method": "open_recorder",
+                                    "action_type": "open_recorder",
+                                    "action_description": hint,
+                                    "action_data": {
+                                        "recorder_url": payload.get("recorder_url") if isinstance(payload, dict) else None,
+                                        "recording_id": payload.get("recording_id") if isinstance(payload, dict) else None,
+                                        "recording_type": payload.get("recording_type") if isinstance(payload, dict) else "audio",
+                                        "title": payload.get("title") if isinstance(payload, dict) else None,
+                                        "duration_minutes": payload.get("duration_minutes") if isinstance(payload, dict) else 60,
+                                    },
+                                    "metadata": {
+                                        "tool": "open_recorder",  # Per activar recorder handling a AdkHitlCard
+                                        "function_call_id": function_call_id,  # Critical per FunctionResponse
+                                        "function_name": "open_recorder",
+                                    },
+                                }
+                            else:
+                                # Generic user input tool
+                                hitl_marker = {
+                                    "_hitl_required": True,
+                                    "agent": "root_agent",  # Generic tool, not A2A
+                                    "method": function_call_name or "request_user_input",
+                                    "action_type": "request_user_input",
+                                    "action_description": hint,
+                                    "action_data": {
+                                        "question": hint,
+                                        "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
+                                        "default_value": payload.get("value") if isinstance(payload, dict) else None,
+                                        "choices": payload.get("choices") if isinstance(payload, dict) else None,
+                                    },
+                                    "metadata": {
+                                        "tool": "request_user_input",  # Per activar input field a AdkHitlCard
+                                        "function_call_id": function_call_id,  # Critical per FunctionResponse
+                                        "function_name": function_call_name or "request_user_input",
+                                    },
                                     "question": hint,
-                                    "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
-                                    "default_value": payload.get("value") if isinstance(payload, dict) else None,
-                                    "choices": payload.get("choices") if isinstance(payload, dict) else None,
-                                },
-                                "metadata": {
-                                    "tool": "request_user_input",  # Per activar input field a AdkHitlCard
-                                    "function_call_id": function_call_id,  # Critical per FunctionResponse
-                                    "function_name": function_call_name or "request_user_input",
-                                },
-                                "question": hint,
-                            }
+                                }
                             tool_calls.append(hitl_marker)
             
             # Extract tool calls and citations from custom_metadata
@@ -875,26 +927,52 @@ async def add_message(
                                         if function_call_name:
                                             break
                                     
+                                    # Detect if this is a recorder tool
+                                    is_recorder = function_call_name == "open_recorder"
+                                    
                                     # Create HITL marker
-                                    hitl_marker = {
-                                        "_hitl_required": True,
-                                        "agent": "root_agent",
-                                        "method": function_call_name or "request_user_input",
-                                        "action_type": "request_user_input",
-                                        "action_description": hint,
-                                        "action_data": {
+                                    if is_recorder:
+                                        # Recorder tool: include recorder-specific data
+                                        hitl_marker = {
+                                            "_hitl_required": True,
+                                            "agent": "root_agent",
+                                            "method": "open_recorder",
+                                            "action_type": "open_recorder",
+                                            "action_description": hint,
+                                            "action_data": {
+                                                "recorder_url": payload.get("recorder_url") if isinstance(payload, dict) else None,
+                                                "recording_id": payload.get("recording_id") if isinstance(payload, dict) else None,
+                                                "recording_type": payload.get("recording_type") if isinstance(payload, dict) else "audio",
+                                                "title": payload.get("title") if isinstance(payload, dict) else None,
+                                                "duration_minutes": payload.get("duration_minutes") if isinstance(payload, dict) else 60,
+                                            },
+                                            "metadata": {
+                                                "tool": "open_recorder",
+                                                "function_call_id": function_call_id,
+                                                "function_name": "open_recorder",
+                                            },
+                                        }
+                                    else:
+                                        # Generic user input tool
+                                        hitl_marker = {
+                                            "_hitl_required": True,
+                                            "agent": "root_agent",
+                                            "method": function_call_name or "request_user_input",
+                                            "action_type": "request_user_input",
+                                            "action_description": hint,
+                                            "action_data": {
+                                                "question": hint,
+                                                "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
+                                                "default_value": payload.get("value") if isinstance(payload, dict) else None,
+                                                "choices": payload.get("choices") if isinstance(payload, dict) else None,
+                                            },
+                                            "metadata": {
+                                                "tool": "request_user_input",
+                                                "function_call_id": function_call_id,
+                                                "function_name": function_call_name or "request_user_input",
+                                            },
                                             "question": hint,
-                                            "input_type": payload.get("input_type", "text") if isinstance(payload, dict) else "text",
-                                            "default_value": payload.get("value") if isinstance(payload, dict) else None,
-                                            "choices": payload.get("choices") if isinstance(payload, dict) else None,
-                                        },
-                                        "metadata": {
-                                            "tool": "request_user_input",
-                                            "function_call_id": function_call_id,
-                                            "function_name": function_call_name or "request_user_input",
-                                        },
-                                        "question": hint,
-                                    }
+                                        }
                                     tool_calls.append(hitl_marker)
                                     break  # Process only first confirmation for now
         except Exception as e:
