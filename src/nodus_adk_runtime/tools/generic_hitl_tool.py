@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List
 from google.adk.tools.function_tool import FunctionTool
 from google.adk.tools.tool_context import ToolContext
 from google.genai import types
-from google.adk.tools.base_tool import override
+from typing_extensions import override
 import structlog
 
 logger = structlog.get_logger()
